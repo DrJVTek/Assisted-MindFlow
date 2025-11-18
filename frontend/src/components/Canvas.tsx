@@ -234,12 +234,41 @@ function CanvasInner() {
     }
   }, [contextMenu, closeContextMenu]);
 
-  const handleDeleteNode = useCallback(() => {
-    if (contextMenu?.nodeId) {
-      console.log('Delete Node clicked for:', contextMenu.nodeId);
-      // TODO: Implement delete confirmation and API call
+  const handleDeleteNode = useCallback(async () => {
+    if (!contextMenu?.nodeId) return;
+
+    const nodeToDelete = graphData?.nodes[contextMenu.nodeId];
+    if (!nodeToDelete) return;
+
+    // Show confirmation dialog
+    const confirmed = window.confirm(
+      `Are you sure you want to delete this ${nodeToDelete.type} node?\n\n` +
+      `"${nodeToDelete.content.substring(0, 100)}${nodeToDelete.content.length > 100 ? '...' : ''}"\n\n` +
+      `This action cannot be undone.`
+    );
+
+    if (!confirmed) {
+      closeContextMenu();
+      return;
     }
-  }, [contextMenu]);
+
+    try {
+      console.log('Deleting node via API:', contextMenu.nodeId);
+
+      await api.deleteNode(graphId, contextMenu.nodeId);
+
+      console.log('Node deleted successfully');
+
+      closeContextMenu();
+
+      // Force reload graph data to show updated graph
+      window.location.reload();
+    } catch (error) {
+      console.error('Error deleting node:', error);
+      alert(`Error deleting node: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      closeContextMenu();
+    }
+  }, [contextMenu, graphData, graphId, closeContextMenu]);
 
   const handleAddChildNode = useCallback(() => {
     if (contextMenu?.nodeId) {

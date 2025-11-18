@@ -34,6 +34,7 @@ import { CustomNode } from './Node';
 import { SettingsPanel } from './SettingsPanel';
 import { ContextMenu } from './ContextMenu';
 import { NodeCreator } from './NodeCreator';
+import { NodeEditor } from './NodeEditor';
 import { api } from '../services/api';
 
 // Type for context menu (defined here to avoid import issues)
@@ -92,6 +93,10 @@ function CanvasInner() {
   // Node creator state
   const [nodeCreatorOpen, setNodeCreatorOpen] = useState(false);
   const [nodeCreatorParentId, setNodeCreatorParentId] = useState<string | undefined>(undefined);
+
+  // Node editor state
+  const [nodeEditorOpen, setNodeEditorOpen] = useState(false);
+  const [nodeBeingEdited, setNodeBeingEdited] = useState<string | null>(null);
 
   // TODO: Get graphId from route params or props (hardcoded for now)
   const graphId = '550e8400-e29b-41d4-a716-446655440000'; // Demo graph UUID
@@ -153,6 +158,12 @@ function CanvasInner() {
     if (!selectedNodeId || !graphData) return null;
     return graphData.nodes[selectedNodeId] || null;
   }, [selectedNodeId, graphData]);
+
+  // Find node being edited from graph data
+  const nodeToEdit = useMemo(() => {
+    if (!nodeBeingEdited || !graphData) return null;
+    return graphData.nodes[nodeBeingEdited] || null;
+  }, [nodeBeingEdited, graphData]);
 
   // Handle viewport changes (save to localStorage with debounce)
   const onMove = useCallback(
@@ -217,10 +228,11 @@ function CanvasInner() {
 
   const handleEditNode = useCallback(() => {
     if (contextMenu?.nodeId) {
-      console.log('Edit Node clicked for:', contextMenu.nodeId);
-      // TODO: Open NodeEditor modal
+      setNodeBeingEdited(contextMenu.nodeId);
+      setNodeEditorOpen(true);
+      closeContextMenu();
     }
-  }, [contextMenu]);
+  }, [contextMenu, closeContextMenu]);
 
   const handleDeleteNode = useCallback(() => {
     if (contextMenu?.nodeId) {
@@ -272,6 +284,31 @@ function CanvasInner() {
       } catch (error) {
         console.error('Error creating node:', error);
         alert(`Error creating node: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    },
+    [graphId]
+  );
+
+  // Handle node update
+  const handleUpdateNode = useCallback(
+    async (nodeId: string, updates: {
+      content: string;
+      importance: number;
+      tags: string[];
+      status: string;
+    }) => {
+      try {
+        console.log('Updating node via API:', nodeId, updates);
+
+        const updatedNode = await api.updateNode(graphId, nodeId, updates);
+
+        console.log('Node updated successfully:', updatedNode);
+
+        // Force reload graph data to show the updated node
+        window.location.reload();
+      } catch (error) {
+        console.error('Error updating node:', error);
+        alert(`Error updating node: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     },
     [graphId]
@@ -523,6 +560,18 @@ function CanvasInner() {
           onClose={() => setNodeCreatorOpen(false)}
           onSave={handleSaveNode}
           parentId={nodeCreatorParentId}
+        />
+      )}
+
+      {/* Node Editor Modal */}
+      {nodeEditorOpen && nodeToEdit && (
+        <NodeEditor
+          node={nodeToEdit}
+          onClose={() => {
+            setNodeEditorOpen(false);
+            setNodeBeingEdited(null);
+          }}
+          onSave={handleUpdateNode}
         />
       )}
     </div>

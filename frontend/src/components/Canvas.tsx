@@ -32,9 +32,12 @@ import { transformGraphToReactFlow } from '../features/canvas/utils/transform';
 import { MIN_ZOOM, MAX_ZOOM, formatZoomPercentage } from '../features/canvas/utils/viewport';
 import { CustomNode } from './Node';
 import { SettingsPanel } from './SettingsPanel';
-import { ContextMenu, ContextMenuType } from './ContextMenu';
+import { ContextMenu } from './ContextMenu';
 import { NodeCreator } from './NodeCreator';
 import { api } from '../services/api';
+
+// Type for context menu (defined here to avoid import issues)
+type ContextMenuType = 'canvas' | 'node';
 
 // Lazy load DetailPanel for better performance
 const DetailPanel = lazy(() => import('./DetailPanel').then(module => ({ default: module.DetailPanel })));

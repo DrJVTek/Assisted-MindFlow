@@ -1,0 +1,393 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MindFlow Orchestrator Contract",
+  "description": "Interface for automatic reasoning graph exploration and hypothesis generation",
+  "version": "1.0.0",
+  "definitions": {
+    "UUID": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "OrchestrationMode": {
+      "type": "string",
+      "enum": ["BreadthFirst", "DepthFirst", "Heuristic", "Temporal"],
+      "description": "Exploration strategy for generating hypotheses"
+    },
+    "OrchestrationState": {
+      "type": "string",
+      "enum": ["idle", "running", "paused", "completed", "failed"],
+      "description": "Current state of orchestration process"
+    },
+    "OrchestrationConfig": {
+      "type": "object",
+      "required": ["group_id", "mode"],
+      "properties": {
+        "group_id": {
+          "$ref": "#/definitions/UUID",
+          "description": "Group to orchestrate within"
+        },
+        "starting_node_id": {
+          "$ref": "#/definitions/UUID",
+          "description": "Node to start exploration from (optional, uses group root if omitted)"
+        },
+        "mode": {
+          "$ref": "#/definitions/OrchestrationMode",
+          "default": "BreadthFirst"
+        },
+        "max_nodes_per_pass": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 10,
+          "description": "Max nodes to generate before pausing for review"
+        },
+        "max_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 5,
+          "description": "Maximum depth of exploration tree"
+        },
+        "time_budget_seconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 3600,
+          "default": 300,
+          "description": "Maximum time to run before auto-pause"
+        },
+        "min_confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.6,
+          "description": "Minimum confidence to continue exploring a branch"
+        },
+        "generate_evaluations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to create evaluation nodes for hypotheses"
+        },
+        "auto_mark_stop": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically mark final nodes as stop=true"
+        }
+      }
+    },
+    "OrchestrationStatus": {
+      "type": "object",
+      "required": ["state", "nodes_generated", "current_depth", "elapsed_time"],
+      "properties": {
+        "state": {
+          "$ref": "#/definitions/OrchestrationState"
+        },
+        "config": {
+          "$ref": "#/definitions/OrchestrationConfig"
+        },
+        "nodes_generated": {
+          "type": "integer",
+          "description": "Total nodes created during orchestration"
+        },
+        "current_depth": {
+          "type": "integer",
+          "description": "Current exploration depth"
+        },
+        "elapsed_time": {
+          "type": "number",
+          "description": "Seconds since orchestration started"
+        },
+        "branches_explored": {
+          "type": "integer",
+          "description": "Number of hypothesis branches explored"
+        },
+        "branches_active": {
+          "type": "integer",
+          "description": "Number of branches still being explored"
+        },
+        "branches_completed": {
+          "type": "integer",
+          "description": "Number of branches marked complete (stop nodes)"
+        },
+        "last_action": {
+          "type": "string",
+          "description": "Human-readable description of last action taken"
+        },
+        "error_message": {
+          "type": "string",
+          "description": "Error message if state is 'failed'"
+        }
+      }
+    },
+    "OrchestrationResult": {
+      "type": "object",
+      "required": ["success"],
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "created_groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UUID"
+          },
+          "description": "Auto-generated subgroups"
+        },
+        "created_nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UUID"
+          }
+        },
+        "stop_nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UUID"
+          },
+          "description": "Nodes marked as exit points"
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "total_hypotheses": {
+              "type": "integer"
+            },
+            "valid_hypotheses": {
+              "type": "integer"
+            },
+            "invalid_hypotheses": {
+              "type": "integer"
+            },
+            "final_nodes": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    }
+  },
+  "modes": {
+    "BreadthFirst": {
+      "description": "Explore all hypotheses at current depth before going deeper",
+      "behavior": "Generate N hypotheses at depth D, evaluate all, then proceed to depth D+1"
+    },
+    "DepthFirst": {
+      "description": "Explore one hypothesis branch fully before moving to next",
+      "behavior": "Pick one hypothesis, explore to max depth, then backtrack and explore next branch"
+    },
+    "Heuristic": {
+      "description": "Prioritize hypotheses by importance/confidence scores",
+      "behavior": "Sort hypotheses by meta.importance, explore most promising first"
+    },
+    "Temporal": {
+      "description": "Prioritize recently created nodes",
+      "behavior": "Always explore newest hypotheses first, deprioritize older branches"
+    }
+  },
+  "workflow": {
+    "description": "Standard orchestration workflow",
+    "steps": [
+      {
+        "step": 1,
+        "action": "Generate hypotheses from starting node",
+        "details": "Use LLM to generate N alternative hypotheses as child nodes"
+      },
+      {
+        "step": 2,
+        "action": "Create auto subgroup per hypothesis",
+        "details": "Each hypothesis gets its own group (kind='generated') for exploration"
+      },
+      {
+        "step": 3,
+        "action": "Evaluate each hypothesis (optional)",
+        "details": "Create evaluation nodes assessing validity, mark status as valid/invalid"
+      },
+      {
+        "step": 4,
+        "action": "Explore valid branches",
+        "details": "For hypotheses marked valid, repeat steps 1-3 recursively"
+      },
+      {
+        "step": 5,
+        "action": "Generate summary nodes",
+        "details": "At max depth or when exploration complete, create summary nodes"
+      },
+      {
+        "step": 6,
+        "action": "Mark stop nodes",
+        "details": "Final nodes in each branch marked with meta.stop=true"
+      }
+    ]
+  },
+  "interface": {
+    "startOrchestration": {
+      "description": "Begin automatic exploration (user must explicitly enable)",
+      "params": {
+        "$ref": "#/definitions/OrchestrationConfig"
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "orchestration_id": {
+            "$ref": "#/definitions/UUID"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "pauseOrchestration": {
+      "description": "Pause running orchestration (can be resumed)",
+      "params": {
+        "type": "object",
+        "required": ["orchestration_id"],
+        "properties": {
+          "orchestration_id": {
+            "$ref": "#/definitions/UUID"
+          }
+        }
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "resumeOrchestration": {
+      "description": "Resume paused orchestration",
+      "params": {
+        "type": "object",
+        "required": ["orchestration_id"],
+        "properties": {
+          "orchestration_id": {
+            "$ref": "#/definitions/UUID"
+          }
+        }
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cancelOrchestration": {
+      "description": "Cancel orchestration permanently (cannot be resumed)",
+      "params": {
+        "type": "object",
+        "required": ["orchestration_id"],
+        "properties": {
+          "orchestration_id": {
+            "$ref": "#/definitions/UUID"
+          },
+          "keep_generated_nodes": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to keep nodes generated so far"
+          }
+        }
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "nodes_kept": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "getStatus": {
+      "description": "Get current orchestration status",
+      "params": {
+        "type": "object",
+        "required": ["orchestration_id"],
+        "properties": {
+          "orchestration_id": {
+            "$ref": "#/definitions/UUID"
+          }
+        }
+      },
+      "returns": {
+        "$ref": "#/definitions/OrchestrationStatus"
+      }
+    },
+    "getResult": {
+      "description": "Get final orchestration result (when state is 'completed')",
+      "params": {
+        "type": "object",
+        "required": ["orchestration_id"],
+        "properties": {
+          "orchestration_id": {
+            "$ref": "#/definitions/UUID"
+          }
+        }
+      },
+      "returns": {
+        "$ref": "#/definitions/OrchestrationResult"
+      }
+    }
+  },
+  "stopping_conditions": {
+    "description": "Orchestration stops when ANY of these conditions are met",
+    "conditions": [
+      {
+        "condition": "max_nodes_per_pass reached",
+        "behavior": "Pause for user review, can be resumed"
+      },
+      {
+        "condition": "max_depth reached",
+        "behavior": "Mark current nodes as stop nodes, complete branch"
+      },
+      {
+        "condition": "time_budget_seconds exceeded",
+        "behavior": "Auto-pause, user can resume or cancel"
+      },
+      {
+        "condition": "All branches below min_confidence",
+        "behavior": "Mark branches invalid, complete orchestration"
+      },
+      {
+        "condition": "User manually pauses/cancels",
+        "behavior": "Immediate pause/cancel, save current state"
+      },
+      {
+        "condition": "LLM error unrecoverable",
+        "behavior": "State transitions to 'failed', save error message"
+      }
+    ]
+  },
+  "safety": {
+    "description": "Safety mechanisms to prevent runaway orchestration",
+    "mechanisms": [
+      "Orchestration disabled by default (constitutional requirement III)",
+      "User must explicitly call startOrchestration (no auto-start)",
+      "max_nodes_per_pass limits nodes before mandatory pause",
+      "time_budget enforces maximum runtime",
+      "User can pause/cancel at any time",
+      "All generated nodes logged with author='llm' for auditability"
+    ]
+  }
+}

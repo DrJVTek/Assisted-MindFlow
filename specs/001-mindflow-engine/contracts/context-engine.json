@@ -1,0 +1,248 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MindFlow Context Engine Contract",
+  "description": "Interface for building context from graph nodes for LLM calls",
+  "version": "1.0.0",
+  "definitions": {
+    "UUID": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "ContextStrategy": {
+      "type": "string",
+      "enum": ["Timeline", "GraphNeighborhood", "GroupContext", "ManualOverride"],
+      "description": "Strategy for selecting nodes to include in context"
+    },
+    "SummaryType": {
+      "type": "string",
+      "enum": ["GlobalSummary", "TemporalSummary", "WeightedSummary", "GroupSummary", "PathSummary", "HybridSummary"],
+      "description": "Method for summarizing context if it exceeds token budget"
+    },
+    "ContextRequest": {
+      "type": "object",
+      "properties": {
+        "focus_node_id": {
+          "$ref": "#/definitions/UUID",
+          "description": "Primary node of interest (optional for some strategies)"
+        },
+        "strategy": {
+          "$ref": "#/definitions/ContextStrategy",
+          "default": "GraphNeighborhood"
+        },
+        "summary_type": {
+          "$ref": "#/definitions/SummaryType",
+          "default": "HybridSummary"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 100000,
+          "default": 8000
+        },
+        "include_comments": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include comments attached to nodes"
+        },
+        "manual_node_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UUID"
+          },
+          "description": "Explicitly selected nodes (used with ManualOverride strategy)"
+        }
+      }
+    },
+    "NodeInContext": {
+      "type": "object",
+      "required": ["node_id", "type", "content", "depth"],
+      "properties": {
+        "node_id": {
+          "$ref": "#/definitions/UUID"
+        },
+        "type": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer",
+          "description": "Distance from focus node (0 = focus, 1 = parent/child, etc.)"
+        },
+        "importance": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ContextResult": {
+      "type": "object",
+      "required": ["selected_nodes", "token_count", "context_text"],
+      "properties": {
+        "selected_nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/NodeInContext"
+          }
+        },
+        "summarized": {
+          "type": "boolean",
+          "description": "Whether context was summarized to fit budget"
+        },
+        "token_count": {
+          "type": "integer",
+          "description": "Estimated token count of context_text"
+        },
+        "context_text": {
+          "type": "string",
+          "description": "Formatted context ready for LLM prompt"
+        },
+        "selection_metadata": {
+          "type": "object",
+          "properties": {
+            "strategy_used": {
+              "$ref": "#/definitions/ContextStrategy"
+            },
+            "summary_type_used": {
+              "$ref": "#/definitions/SummaryType"
+            },
+            "total_nodes_available": {
+              "type": "integer"
+            },
+            "nodes_included": {
+              "type": "integer"
+            },
+            "nodes_summarized": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    }
+  },
+  "strategies": {
+    "Timeline": {
+      "description": "Select nodes in chronological order (oldest to newest or newest to oldest)",
+      "behavior": "Sort all nodes by created_at timestamp, include most recent until token budget met"
+    },
+    "GraphNeighborhood": {
+      "description": "Select nodes around focus node (parents, children, siblings)",
+      "behavior": "Include focus node + direct parents/children + parents' children (siblings) up to token budget"
+    },
+    "GroupContext": {
+      "description": "Select all nodes in the same group(s) as focus node",
+      "behavior": "Include all nodes that share at least one group with focus node"
+    },
+    "ManualOverride": {
+      "description": "Use explicitly specified node IDs",
+      "behavior": "Include only nodes listed in manual_node_ids parameter"
+    }
+  },
+  "summaryTypes": {
+    "GlobalSummary": {
+      "description": "Summarize entire graph into single overview",
+      "behavior": "Group nodes by type, generate one-sentence summary per type"
+    },
+    "TemporalSummary": {
+      "description": "Prioritize recent nodes, summarize older ones",
+      "behavior": "Include full content for newest nodes, summarize older nodes in batches"
+    },
+    "WeightedSummary": {
+      "description": "Prioritize nodes by importance score",
+      "behavior": "Sort by meta.importance, include high-importance nodes fully, summarize low-importance"
+    },
+    "GroupSummary": {
+      "description": "Summarize per-group, then combine",
+      "behavior": "Generate summary for each group separately, then combine summaries"
+    },
+    "PathSummary": {
+      "description": "Summarize path from root to focus node",
+      "behavior": "Trace lineage from focus node to root(s), include key nodes along path"
+    },
+    "HybridSummary": {
+      "description": "Optimized mix of above strategies",
+      "behavior": "Use importance + recency + depth to prioritize, summarize least relevant nodes"
+    }
+  },
+  "interface": {
+    "buildContext": {
+      "description": "Build context from graph for LLM call",
+      "params": {
+        "$ref": "#/definitions/ContextRequest"
+      },
+      "returns": {
+        "$ref": "#/definitions/ContextResult"
+      }
+    },
+    "previewContext": {
+      "description": "Preview what would be included without building full text",
+      "params": {
+        "$ref": "#/definitions/ContextRequest"
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "selected_node_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/UUID"
+            }
+          },
+          "estimated_tokens": {
+            "type": "integer"
+          },
+          "would_require_summary": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "countTokens": {
+      "description": "Count tokens in text using current provider's tokenizer",
+      "params": {
+        "type": "object",
+        "required": ["text"],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "default": "openai",
+            "description": "Provider to use for token counting"
+          }
+        }
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "token_count": {
+            "type": "integer"
+          },
+          "character_count": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  },
+  "formatting": {
+    "description": "How context text is formatted for LLM consumption",
+    "template": "# Reasoning Graph Context\n\n## Focus Node\n{focus_node.type}: {focus_node.content}\n\n## Related Nodes\n\n{for node in selected_nodes}\n### [{node.type}] {node.id[:8]}\n**Author**: {node.author} | **Importance**: {node.importance} | **Created**: {node.created_at}\n{node.content}\n{if node.comments}\n  **Comments**:\n  {for comment in node.comments}\n  - [{comment.author}]: {comment.content}\n  {endfor}\n{endif}\n---\n{endfor}\n\n## Summary\n{if summarized}\nNote: Context was summarized to fit token budget. {nodes_summarized} nodes condensed.\n{endif}\n\nTotal nodes in context: {selected_nodes.length}\nEstimated tokens: {token_count}"
+  }
+}

@@ -1,0 +1,545 @@
+openapi: 3.0.3
+info:
+  title: MindFlow Canvas API
+  description: REST API for the Interactive Node Canvas Interface
+  version: 1.0.0
+  contact:
+    name: MindFlow Team
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development server
+  - url: http://localhost:8000/api/v1
+    description: Versioned API endpoint
+
+tags:
+  - name: graphs
+    description: Graph data operations
+  - name: viewport
+    description: Canvas viewport state
+
+paths:
+  /graphs/{graphId}:
+    get:
+      summary: Get complete graph data
+      description: Retrieve a graph with all nodes, groups, comments, and node positions
+      operationId: getGraph
+      tags:
+        - graphs
+      parameters:
+        - name: graphId
+          in: path
+          required: true
+          description: UUID of the graph to retrieve
+          schema:
+            type: string
+            format: uuid
+            example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      responses:
+        '200':
+          description: Graph data retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Graph'
+        '404':
+          description: Graph not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /graphs/{graphId}/nodes:
+    get:
+      summary: Get graph nodes only
+      description: Retrieve only the nodes for a graph (lightweight endpoint for initial render)
+      operationId: getGraphNodes
+      tags:
+        - graphs
+      parameters:
+        - name: graphId
+          in: path
+          required: true
+          description: UUID of the graph
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of nodes to return (for pagination)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          description: Number of nodes to skip (for pagination)
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Nodes retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: object
+                    additionalProperties:
+                      $ref: '#/components/schemas/Node'
+                  total:
+                    type: integer
+                    description: Total number of nodes in the graph
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+        '404':
+          description: Graph not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /graphs/{graphId}/viewport:
+    post:
+      summary: Save viewport state
+      description: Persist current canvas viewport settings (zoom, pan) to backend
+      operationId: saveViewport
+      tags:
+        - viewport
+      parameters:
+        - name: graphId
+          in: path
+          required: true
+          description: UUID of the graph
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanvasViewport'
+      responses:
+        '200':
+          description: Viewport saved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Viewport state saved"
+        '400':
+          description: Invalid viewport data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Graph not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: Get viewport state
+      description: Retrieve saved viewport state for a graph
+      operationId: getViewport
+      tags:
+        - viewport
+      parameters:
+        - name: graphId
+          in: path
+          required: true
+          description: UUID of the graph
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Viewport retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanvasViewport'
+        '404':
+          description: Viewport state not found (returns default viewport)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanvasViewport'
+
+components:
+  schemas:
+    Graph:
+      type: object
+      required:
+        - id
+        - meta
+        - nodes
+        - groups
+        - comments
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique graph identifier
+        meta:
+          $ref: '#/components/schemas/GraphMetadata'
+        nodes:
+          type: object
+          description: Dictionary of nodes keyed by UUID
+          additionalProperties:
+            $ref: '#/components/schemas/Node'
+        groups:
+          type: object
+          description: Dictionary of groups keyed by UUID
+          additionalProperties:
+            $ref: '#/components/schemas/Group'
+        comments:
+          type: object
+          description: Dictionary of comments keyed by UUID
+          additionalProperties:
+            $ref: '#/components/schemas/Comment'
+      example:
+        id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        meta:
+          name: "Example Reasoning Graph"
+          description: "A sample graph for testing"
+          created_at: "2025-11-17T10:00:00Z"
+          updated_at: "2025-11-17T10:30:00Z"
+          schema_version: "1.0.0"
+        nodes:
+          "node1":
+            id: "node1"
+            type: "question"
+            author: "human"
+            content: "What is the best approach?"
+            parents: []
+            children: ["node2"]
+            groups: []
+            meta:
+              position:
+                x: 100
+                y: 200
+              created_at: "2025-11-17T10:00:00Z"
+              updated_at: "2025-11-17T10:00:00Z"
+              importance: 0.8
+              tags: ["planning"]
+              status: "draft"
+              stop: false
+
+    GraphMetadata:
+      type: object
+      required:
+        - name
+        - created_at
+        - updated_at
+        - schema_version
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        schema_version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+          example: "1.0.0"
+
+    Node:
+      type: object
+      required:
+        - id
+        - type
+        - author
+        - content
+        - parents
+        - children
+        - groups
+        - meta
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum:
+            - question
+            - answer
+            - note
+            - hypothesis
+            - evaluation
+            - summary
+            - plan
+            - group_meta
+            - comment
+            - stop
+        author:
+          type: string
+          enum:
+            - human
+            - llm
+            - tool
+        content:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        parents:
+          type: array
+          items:
+            type: string
+            format: uuid
+        children:
+          type: array
+          items:
+            type: string
+            format: uuid
+        groups:
+          type: array
+          items:
+            type: string
+            format: uuid
+        meta:
+          $ref: '#/components/schemas/NodeMetadata'
+
+    NodeMetadata:
+      type: object
+      required:
+        - created_at
+        - updated_at
+        - importance
+        - tags
+        - status
+        - stop
+      properties:
+        position:
+          type: object
+          nullable: true
+          description: Node position on canvas (UI-specific)
+          properties:
+            x:
+              type: number
+              description: X coordinate in canvas space
+            y:
+              type: number
+              description: Y coordinate in canvas space
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        importance:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          default: 0.5
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum:
+            - draft
+            - valid
+            - invalid
+            - final
+            - experimental
+        stop:
+          type: boolean
+          description: Whether this node terminates a reasoning path
+
+    Group:
+      type: object
+      required:
+        - id
+        - label
+        - kind
+        - meta
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+          minLength: 1
+          maxLength: 100
+        kind:
+          type: string
+          enum:
+            - project
+            - cluster
+            - subgroup
+            - generated
+            - auto
+        parent_group:
+          type: string
+          format: uuid
+          nullable: true
+        meta:
+          $ref: '#/components/schemas/GroupMetadata'
+
+    GroupMetadata:
+      type: object
+      required:
+        - pinned_nodes
+        - created_at
+        - tags
+      properties:
+        color:
+          type: string
+          nullable: true
+          pattern: '^#[0-9A-Fa-f]{6}$'
+          example: "#FF5733"
+        pinned_nodes:
+          type: array
+          items:
+            type: string
+            format: uuid
+        created_at:
+          type: string
+          format: date-time
+        tags:
+          type: array
+          items:
+            type: string
+
+    Comment:
+      type: object
+      required:
+        - id
+        - author
+        - content
+        - attached_to
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        author:
+          type: string
+          enum:
+            - human
+            - llm
+            - tool
+        content:
+          type: string
+          minLength: 1
+          maxLength: 5000
+        attached_to:
+          type: object
+          description: Reference to node or edge
+          oneOf:
+            - type: object
+              properties:
+                node:
+                  type: string
+                  format: uuid
+            - type: object
+              properties:
+                edge:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  minItems: 2
+                  maxItems: 2
+        created_at:
+          type: string
+          format: date-time
+
+    CanvasViewport:
+      type: object
+      required:
+        - zoom
+        - x
+        - y
+        - width
+        - height
+      properties:
+        zoom:
+          type: number
+          format: float
+          minimum: 0.25
+          maximum: 4.0
+          description: Zoom level (0.25 = 25%, 4.0 = 400%)
+          example: 1.0
+        x:
+          type: number
+          format: float
+          description: X-axis pan offset in canvas coordinates
+          example: 0
+        y:
+          type: number
+          format: float
+          description: Y-axis pan offset in canvas coordinates
+          example: 0
+        width:
+          type: integer
+          minimum: 1
+          description: Viewport width in pixels
+          example: 1920
+        height:
+          type: integer
+          minimum: 1
+          description: Viewport height in pixels
+          example: 1080
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code
+          example: "NOT_FOUND"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Graph with ID a1b2c3d4-e5f6-7890-abcd-ef1234567890 not found"
+        details:
+          type: object
+          nullable: true
+          description: Additional error details
+          additionalProperties: true
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: JWT bearer token (future enhancement, not in scope for P1)
+
+security: []  # No authentication for P1 (local-only usage)

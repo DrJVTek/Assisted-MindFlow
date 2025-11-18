@@ -1,0 +1,85 @@
+{
+  "llm_providers": {
+    "claude": {
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 4096,
+      "temperature": 0.7,
+      "top_p": 1.0,
+      "timeout": 30,
+      "retries": 3
+    },
+    "openai": {
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-4-turbo-preview",
+      "max_tokens": 4096,
+      "temperature": 0.7,
+      "top_p": 1.0,
+      "timeout": 30,
+      "retries": 3
+    },
+    "mistral": {
+      "api_key_env": "MISTRAL_API_KEY",
+      "endpoint": "https://api.mistral.ai/v1/chat/completions",
+      "model": "mistral-large-latest",
+      "max_tokens": 4096,
+      "temperature": 0.7,
+      "timeout": 30,
+      "retries": 3
+    },
+    "groq": {
+      "api_key_env": "GROQ_API_KEY",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "model": "mixtral-8x7b-32768",
+      "max_tokens": 4096,
+      "temperature": 0.7,
+      "timeout": 30,
+      "retries": 3
+    },
+    "ollama_llama2": {
+      "provider_type": "local",
+      "endpoint": "http://localhost:11434/api/generate",
+      "model": "llama2",
+      "max_tokens": 4096,
+      "temperature": 0.7,
+      "timeout": 60,
+      "retries": 3
+    },
+    "ollama_mistral": {
+      "provider_type": "local",
+      "endpoint": "http://localhost:11434/api/generate",
+      "model": "mistral",
+      "max_tokens": 4096,
+      "temperature": 0.7,
+      "timeout": 60,
+      "retries": 3
+    },
+    "ollama_codellama": {
+      "provider_type": "local",
+      "endpoint": "http://localhost:11434/api/generate",
+      "model": "codellama",
+      "max_tokens": 4096,
+      "temperature": 0.7,
+      "timeout": 60,
+      "retries": 3
+    }
+  },
+  "context_engine": {
+    "default_strategy": "GraphNeighborhood",
+    "default_summary": "HybridSummary",
+    "max_tokens": 8000
+  },
+  "storage": {
+    "data_dir": "./data/graphs",
+    "backup_dir": "./data/backups",
+    "auto_backup": true,
+    "backup_on_save": true
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "json",
+    "output": "stdout",
+    "log_operations": true,
+    "log_content": false
+  }
+}

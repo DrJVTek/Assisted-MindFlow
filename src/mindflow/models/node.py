@@ -1,0 +1,113 @@
+"""Node model for MindFlow Engine.
+
+A Node represents a discrete unit of thought/reasoning in the graph.
+Nodes can be questions, answers, hypotheses, evaluations, summaries, etc.
+"""
+
+from datetime import UTC, datetime
+from typing import Literal
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel, Field
+
+
+# Type definitions
+NodeType = Literal[
+    "question",
+    "answer",
+    "note",
+    "hypothesis",
+    "evaluation",
+    "summary",
+    "plan",
+    "group_meta",
+    "comment",
+    "stop",
+]
+
+NodeAuthor = Literal["human", "llm", "tool"]
+
+NodeStatus = Literal["draft", "valid", "invalid", "final", "experimental"]
+
+
+class Position(BaseModel):
+    """2D position for canvas rendering.
+
+    Attributes:
+        x: X coordinate on canvas
+        y: Y coordinate on canvas
+    """
+
+    x: float
+    y: float
+
+
+class NodeMetadata(BaseModel):
+    """Metadata for a Node.
+
+    Attributes:
+        created_at: Timestamp when node was created
+        updated_at: Timestamp when node was last updated
+        importance: Importance score (0.0 to 1.0) for context selection
+        tags: User-defined tags for categorization
+        status: Current status of the node
+        stop: If True, marks node as exit/output point (end of reasoning path)
+        position: 2D canvas position (optional)
+    """
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
+    tags: list[str] = Field(default_factory=list)
+    status: NodeStatus = "draft"
+    stop: bool = False
+    position: Position | None = None
+
+
+class Node(BaseModel):
+    """A Node in the reasoning graph.
+
+    Nodes represent discrete units of thought with typed content and relationships.
+    They form a directed acyclic graph (DAG) through parent-child links.
+
+    Attributes:
+        id: Unique identifier (UUID)
+        type: Type of node (question, answer, hypothesis, etc.)
+        author: Who created this node (human, llm, or tool)
+        content: The actual content (1-10000 characters)
+        parents: List of parent node IDs
+        children: List of child node IDs
+        groups: List of group IDs this node belongs to
+        meta: Metadata including timestamps, importance, tags, status
+
+    Invariants:
+        - If node A is in node B's parents, then B must be in A's children
+        - No node can be its own ancestor (enforced by graph operations)
+        - Stop nodes typically have no children
+
+    Example:
+        >>> node = Node(
+        ...     type="question",
+        ...     author="human",
+        ...     content="What is the best approach for this problem?"
+        ... )
+        >>> node.meta.importance = 0.8
+        >>> node.update_timestamp()
+    """
+
+    id: UUID = Field(default_factory=uuid4)
+    type: NodeType
+    author: NodeAuthor
+    content: str = Field(min_length=1, max_length=10000)
+    parents: list[UUID] = Field(default_factory=list)
+    children: list[UUID] = Field(default_factory=list)
+    groups: list[UUID] = Field(default_factory=list)
+    meta: NodeMetadata = Field(default_factory=NodeMetadata)
+
+    def update_timestamp(self) -> None:
+        """Update the modified timestamp.
+
+        Should be called whenever the node's content or metadata is modified.
+        Does not modify created_at timestamp.
+        """
+        self.meta.updated_at = datetime.now(UTC)

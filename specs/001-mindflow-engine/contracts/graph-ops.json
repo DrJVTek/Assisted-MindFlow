@@ -1,0 +1,419 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MindFlow Graph Operations API Contract",
+  "description": "Defines all graph operations for manipulating nodes, groups, and relationships",
+  "version": "1.0.0",
+  "definitions": {
+    "UUID": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "NodeType": {
+      "type": "string",
+      "enum": ["question", "answer", "note", "hypothesis", "evaluation", "summary", "plan", "group_meta", "comment", "stop"]
+    },
+    "NodeAuthor": {
+      "type": "string",
+      "enum": ["human", "llm", "tool"]
+    },
+    "NodeStatus": {
+      "type": "string",
+      "enum": ["draft", "valid", "invalid", "final", "experimental"]
+    },
+    "GroupKind": {
+      "type": "string",
+      "enum": ["project", "cluster", "subgroup", "generated", "auto"]
+    },
+    "GraphOperation": {
+      "type": "object",
+      "required": ["op", "params"],
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "CREATE_NODE", "UPDATE_NODE", "DELETE_NODE", "LINK",
+            "CREATE_GROUP", "ADD_NODE_TO_GROUP", "REMOVE_NODE_FROM_GROUP",
+            "MERGE_GROUPS", "MERGE_NODES", "FORK_FROM", "SET_STOP",
+            "RECABLE_NODE", "ADD_COMMENT"
+          ]
+        },
+        "params": {
+          "type": "object"
+        }
+      }
+    },
+    "GraphOperationResult": {
+      "type": "object",
+      "required": ["success", "message"],
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "created_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UUID"
+          }
+        },
+        "modified_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UUID"
+          }
+        }
+      }
+    }
+  },
+  "operations": {
+    "CREATE_NODE": {
+      "description": "Create a new node in the graph",
+      "params": {
+        "type": "object",
+        "required": ["type", "content"],
+        "properties": {
+          "type": {
+            "$ref": "#/definitions/NodeType"
+          },
+          "author": {
+            "$ref": "#/definitions/NodeAuthor",
+            "default": "human"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "parents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/UUID"
+            },
+            "default": []
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/UUID"
+            },
+            "default": []
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "importance": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "default": 0.5
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "status": {
+                "$ref": "#/definitions/NodeStatus",
+                "default": "draft"
+              }
+            }
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "UPDATE_NODE": {
+      "description": "Update an existing node's content or metadata",
+      "params": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "$ref": "#/definitions/UUID"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "importance": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "status": {
+                "$ref": "#/definitions/NodeStatus"
+              }
+            }
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "LINK": {
+      "description": "Create parent-child link between two nodes",
+      "params": {
+        "type": "object",
+        "required": ["parent_id", "child_id"],
+        "properties": {
+          "parent_id": {
+            "$ref": "#/definitions/UUID"
+          },
+          "child_id": {
+            "$ref": "#/definitions/UUID"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "DELETE_NODE": {
+      "description": "Delete a node from the graph (with safeguards)",
+      "params": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "$ref": "#/definitions/UUID"
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "Force deletion even if node has children"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "CREATE_GROUP": {
+      "description": "Create a new group for organizing nodes",
+      "params": {
+        "type": "object",
+        "required": ["label", "kind"],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "kind": {
+            "$ref": "#/definitions/GroupKind"
+          },
+          "parent_group": {
+            "$ref": "#/definitions/UUID"
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "color": {
+                "type": "string",
+                "pattern": "^#[0-9A-Fa-f]{6}$"
+              },
+              "tags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "ADD_NODE_TO_GROUP": {
+      "description": "Add a node to a group",
+      "params": {
+        "type": "object",
+        "required": ["node_id", "group_id"],
+        "properties": {
+          "node_id": {
+            "$ref": "#/definitions/UUID"
+          },
+          "group_id": {
+            "$ref": "#/definitions/UUID"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "REMOVE_NODE_FROM_GROUP": {
+      "description": "Remove a node from a group",
+      "params": {
+        "type": "object",
+        "required": ["node_id", "group_id"],
+        "properties": {
+          "node_id": {
+            "$ref": "#/definitions/UUID"
+          },
+          "group_id": {
+            "$ref": "#/definitions/UUID"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "MERGE_NODES": {
+      "description": "Merge multiple nodes into a synthesis node",
+      "params": {
+        "type": "object",
+        "required": ["node_ids", "objective"],
+        "properties": {
+          "node_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/UUID"
+            },
+            "minItems": 2
+          },
+          "objective": {
+            "type": "string",
+            "description": "Human-readable goal for merge"
+          },
+          "output_type": {
+            "$ref": "#/definitions/NodeType",
+            "default": "summary"
+          },
+          "use_ai_synthesis": {
+            "type": "boolean",
+            "default": false,
+            "description": "Request AI to generate synthesis content"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "FORK_FROM": {
+      "description": "Create a child question node from an existing node",
+      "params": {
+        "type": "object",
+        "required": ["node_id", "question"],
+        "properties": {
+          "node_id": {
+            "$ref": "#/definitions/UUID"
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "SET_STOP": {
+      "description": "Mark a node as a stop/exit point",
+      "params": {
+        "type": "object",
+        "required": ["node_id"],
+        "properties": {
+          "node_id": {
+            "$ref": "#/definitions/UUID"
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "RECABLE_NODE": {
+      "description": "Change a node's parent relationships",
+      "params": {
+        "type": "object",
+        "required": ["node_id", "new_parents"],
+        "properties": {
+          "node_id": {
+            "$ref": "#/definitions/UUID"
+          },
+          "new_parents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/UUID"
+            }
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    },
+    "ADD_COMMENT": {
+      "description": "Add a comment to a node or edge",
+      "params": {
+        "type": "object",
+        "required": ["content", "attached_to"],
+        "properties": {
+          "author": {
+            "$ref": "#/definitions/NodeAuthor",
+            "default": "human"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000
+          },
+          "attached_to": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["node_id"],
+                "properties": {
+                  "node_id": {
+                    "$ref": "#/definitions/UUID"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["edge"],
+                "properties": {
+                  "edge": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/UUID"
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "result": {
+        "$ref": "#/definitions/GraphOperationResult"
+      }
+    }
+  }
+}

@@ -42,6 +42,7 @@ interface NodeData {
   borderColor: string;
   borderWidth: number;
   opacity: number;
+  currentZoom?: number; // Optional: for zoom-based rendering
 }
 
 /**
@@ -136,9 +137,11 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     borderColor,
     borderWidth,
     opacity,
+    currentZoom = 1.0,
   } = data;
 
   const statusColor = getStatusColor(status);
+  const isZoomedOut = currentZoom < 0.5; // Simplify rendering below 50% zoom
 
   return (
     <div
@@ -185,23 +188,21 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
         }}
       />
 
-      {/* Header: Type icon + Status badge + Author */}
-      <div
-        style={{
+      {/* Simplified rendering at low zoom (<50%) */}
+      {isZoomedOut ? (
+        <div style={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: '8px',
-        }}
-      >
-        {/* Type icon + label */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          justifyContent: 'center',
+          height: '100%',
+          gap: '6px',
+        }}>
           <div style={{ color: '#546E7A', display: 'flex' }}>
             {getTypeIcon(type)}
           </div>
           <span
             style={{
-              fontSize: '12px',
+              fontSize: '11px',
               fontWeight: 600,
               color: '#546E7A',
               textTransform: 'capitalize',
@@ -210,62 +211,91 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
             {type.replace('_', ' ')}
           </span>
         </div>
-
-        {/* Status badge + Author icon */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {/* Status badge */}
+      ) : (
+        <>
+          {/* Header: Type icon + Status badge + Author */}
           <div
             style={{
-              backgroundColor: statusColor,
-              color: 'white',
-              padding: '2px 6px',
-              borderRadius: '4px',
-              fontSize: '10px',
-              fontWeight: 600,
-              textTransform: 'uppercase',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '8px',
             }}
           >
-            {status}
+            {/* Type icon + label */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ color: '#546E7A', display: 'flex' }}>
+                {getTypeIcon(type)}
+              </div>
+              <span
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: '#546E7A',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {type.replace('_', ' ')}
+              </span>
+            </div>
+
+            {/* Status badge + Author icon */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {/* Status badge */}
+              <div
+                style={{
+                  backgroundColor: statusColor,
+                  color: 'white',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                }}
+              >
+                {status}
+              </div>
+
+              {/* Author icon */}
+              <div
+                style={{ color: '#78909C', display: 'flex' }}
+                title={`Author: ${author}`}
+              >
+                {getAuthorIcon(author)}
+              </div>
+            </div>
           </div>
 
-          {/* Author icon */}
+          {/* Content preview */}
           <div
-            style={{ color: '#78909C', display: 'flex' }}
-            title={`Author: ${author}`}
+            style={{
+              fontSize: '14px',
+              lineHeight: '1.5',
+              color: '#37474F',
+              wordWrap: 'break-word',
+              overflowWrap: 'break-word',
+            }}
           >
-            {getAuthorIcon(author)}
+            {preview}
           </div>
-        </div>
-      </div>
 
-      {/* Content preview */}
-      <div
-        style={{
-          fontSize: '14px',
-          lineHeight: '1.5',
-          color: '#37474F',
-          wordWrap: 'break-word',
-          overflowWrap: 'break-word',
-        }}
-      >
-        {preview}
-      </div>
-
-      {/* Importance indicator (bottom border) */}
-      {importance > 7 && (
-        <div
-          style={{
-            marginTop: '8px',
-            paddingTop: '8px',
-            borderTop: `2px solid ${borderColor}`,
-            fontSize: '10px',
-            color: '#78909C',
-            fontWeight: 600,
-            textAlign: 'right',
-          }}
-        >
-          High Priority
-        </div>
+          {/* Importance indicator (bottom border) */}
+          {importance > 7 && (
+            <div
+              style={{
+                marginTop: '8px',
+                paddingTop: '8px',
+                borderTop: `2px solid ${borderColor}`,
+                fontSize: '10px',
+                color: '#78909C',
+                fontWeight: 600,
+                textAlign: 'right',
+              }}
+            >
+              High Priority
+            </div>
+          )}
+        </>
       )}
     </div>
   );

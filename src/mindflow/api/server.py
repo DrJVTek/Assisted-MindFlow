@@ -3,6 +3,7 @@
 This module provides REST API endpoints for the interactive node canvas interface.
 """
 
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -23,10 +24,23 @@ async def startup_event():
     graphs.add_graph_to_storage(demo_graph)
     print(f"[OK] Demo graph loaded: {demo_graph.id}")
 
-# Enable CORS for frontend (localhost:5173)
+# Configure CORS based on environment
+ENV = os.getenv("ENV", "development")
+if ENV == "production":
+    # Production: Restrict to specific domains
+    allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+else:
+    # Development: Allow localhost on common ports
+    allowed_origins = [
+        "http://localhost:5173",  # Vite default
+        "http://localhost:3000",  # Common React port
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

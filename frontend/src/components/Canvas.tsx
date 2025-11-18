@@ -8,9 +8,11 @@
  * - Controls for zoom/fit-to-view
  * - Keyboard shortcuts
  * - Viewport persistence
+ * - Touch gestures: pinch-to-zoom, two-finger pan, tap to select
+ * - Mouse: drag to pan, scroll to zoom, click to select
  */
 
-import React, { useCallback, useMemo, useEffect, useState } from 'react';
+import React, { useCallback, useMemo, useEffect, useState, lazy, Suspense } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -28,7 +30,9 @@ import { useViewport } from '../features/canvas/hooks/useViewport';
 import { transformGraphToReactFlow } from '../features/canvas/utils/transform';
 import { MIN_ZOOM, MAX_ZOOM, formatZoomPercentage } from '../features/canvas/utils/viewport';
 import { CustomNode } from './Node';
-import { DetailPanel } from './DetailPanel';
+
+// Lazy load DetailPanel for better performance
+const DetailPanel = lazy(() => import('./DetailPanel').then(module => ({ default: module.DetailPanel })));
 
 // Register custom node types
 const nodeTypes = {
@@ -76,13 +80,22 @@ function CanvasInner() {
   // Viewport management with persistence
   const { saveViewport, fitView, zoomIn, zoomOut } = useViewport(graphId);
 
-  // Transform graph data to React Flow format with edge emphasis
+  // Transform graph data to React Flow format with edge emphasis and zoom-based detail level
   const { nodes, edges } = useMemo(() => {
     if (!graphData) {
       return { nodes: [], edges: [] };
     }
 
     const { nodes: rfNodes, edges: rfEdges } = transformGraphToReactFlow(graphData);
+
+    // Add current zoom level to node data for conditional rendering
+    const nodesWithZoom = rfNodes.map(node => ({
+      ...node,
+      data: {
+        ...node.data,
+        currentZoom,
+      },
+    }));
 
     // Emphasize edges connected to selected node
     if (selectedNodeId) {
@@ -102,11 +115,11 @@ function CanvasInner() {
         }
         return edge;
       });
-      return { nodes: rfNodes, edges: emphasizedEdges };
+      return { nodes: nodesWithZoom, edges: emphasizedEdges };
     }
 
-    return { nodes: rfNodes, edges: rfEdges };
-  }, [graphData, selectedNodeId]);
+    return { nodes: nodesWithZoom, edges: rfEdges };
+  }, [graphData, selectedNodeId, currentZoom]);
 
   // Find selected node from graph data
   const selectedNode = useMemo(() => {
@@ -240,7 +253,11 @@ function CanvasInner() {
   }
 
   return (
-    <div style={{ width: '100%', height: '100vh' }}>
+    <div style={{
+      width: '100%',
+      height: '100vh',
+      touchAction: 'none', // Prevent browser default touch behaviors
+    }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -253,12 +270,15 @@ function CanvasInner() {
         maxZoom={MAX_ZOOM}
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
         fitView={preferences.autoFitOnLoad}
-        panOnDrag={true}
-        panOnScroll={false}
-        zoomOnScroll={true}
-        zoomOnPinch={true}
-        zoomOnDoubleClick={false}
-        selectNodesOnDrag={false}
+        // Touch & Mouse Configuration
+        panOnDrag={true}        // Enables mouse drag and single-finger pan on touch devices
+        panOnScroll={false}     // Disabled: scroll is used for zoom (better UX)
+        zoomOnScroll={true}     // Mouse wheel zoom on desktop
+        zoomOnPinch={true}      // Pinch-to-zoom on touch devices
+        zoomOnDoubleClick={false} // Disabled: reserved for fit-to-view
+        selectNodesOnDrag={false} // Prevents accidental selection during pan
+        // Performance Optimizations
+        onlyRenderVisibleElements={true} // Viewport culling for large graphs
         attributionPosition="bottom-right"
       >
         {/* Grid background */}
@@ -297,12 +317,26 @@ function CanvasInner() {
         </Panel>
       </ReactFlow>
 
-      {/* Detail Panel */}
+      {/* Detail Panel (lazy loaded) */}
       {selectedNode && (
-        <DetailPanel
-          node={selectedNode}
-          onClose={() => selectNode(null)}
-        />
+        <Suspense fallback={<div style={{
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          width: '400px',
+          height: '100vh',
+          backgroundColor: 'white',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.1)',
+          zIndex: 1000,
+        }}>Loading...</div>}>
+          <DetailPanel
+            node={selectedNode}
+            onClose={() => selectNode(null)}
+          />
+        </Suspense>
       )}
     </div>
   );

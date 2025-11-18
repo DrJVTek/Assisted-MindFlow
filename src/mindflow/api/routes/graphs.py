@@ -1,11 +1,15 @@
 """Graph API endpoints."""
 
+import logging
 from fastapi import APIRouter, HTTPException, Query
 from uuid import UUID
 from typing import Dict
 
 from mindflow.models.graph import Graph
 from mindflow.models.node import Node
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/graphs", tags=["graphs"])
 
@@ -28,12 +32,17 @@ async def get_graph(graph_id: str) -> Graph:
     Raises:
         HTTPException: 404 if graph not found
     """
+    logger.info(f"GET /api/graphs/{graph_id}")
+
     if graph_id not in _graphs_storage:
+        logger.warning(f"Graph not found: {graph_id}")
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
         )
 
-    return _graphs_storage[graph_id]
+    graph = _graphs_storage[graph_id]
+    logger.info(f"Retrieved graph {graph_id} with {len(graph.nodes)} nodes")
+    return graph
 
 
 @router.get("/{graph_id}/nodes")

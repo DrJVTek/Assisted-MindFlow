@@ -145,6 +145,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
 
   return (
     <div
+      className="mindflow-node"
       style={{
         backgroundColor,
         borderColor: selected ? '#1976D2' : borderColor,
@@ -161,7 +162,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
           : importance > 7
           ? '0 4px 8px rgba(0, 0, 0, 0.1)'
           : '0 2px 4px rgba(0, 0, 0, 0.05)',
-        transition: 'all 0.2s ease',
+        transition: 'all 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease',
         cursor: 'pointer',
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}

@@ -3,9 +3,34 @@
   line-height: 1.5;
   font-weight: 400;
 
+  /* Theme Colors - Light Mode */
+  --canvas-bg: #F5F7FA;
+  --canvas-grid: #E0E0E0;
+  --node-bg: #FFFFFF;
+  --node-border: #CFD8DC;
+  --node-text: #37474F;
+  --node-text-secondary: #78909C;
+  --node-hover-shadow: rgba(0, 0, 0, 0.12);
+  --primary-color: #1976D2;
+  --primary-hover: #1565C0;
+  --panel-bg: #FFFFFF;
+  --panel-border: #E0E0E0;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+
   color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  color: var(--node-text);
+  background-color: var(--canvas-bg);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -52,6 +77,44 @@ button:hover {
 button:focus,
 button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
+}
+
+/* Dark Mode */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas-bg: #1A1A1A;
+    --canvas-grid: #2D2D2D;
+    --node-bg: #2D2D2D;
+    --node-border: #424242;
+    --node-text: #E0E0E0;
+    --node-text-secondary: #B0B0B0;
+    --node-hover-shadow: rgba(255, 255, 255, 0.1);
+    --primary-color: #42A5F5;
+    --primary-hover: #64B5F6;
+    --panel-bg: #2D2D2D;
+    --panel-border: #424242;
+  }
+}
+
+/* Node Hover Effects */
+.mindflow-node:hover:not(.react-flow__node-selected) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px var(--node-hover-shadow) !important;
+  border-color: var(--primary-color) !important;
+}
+
+.mindflow-node:active {
+  transform: translateY(0);
+}
+
+/* React Flow Customization */
+.react-flow__attribution {
+  opacity: 0.3;
+  transition: opacity var(--transition-normal);
+}
+
+.react-flow__attribution:hover {
+  opacity: 0.7;
 }
 
 @media (prefers-color-scheme: light) {

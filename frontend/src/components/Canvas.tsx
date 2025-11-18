@@ -516,8 +516,9 @@ function CanvasInner() {
         zoomOnDoubleClick={false} // Disabled: node double-click opens editor
         nodesDraggable={true}     // Enable node dragging with left mouse button
         nodesConnectable={false}  // Disable edge creation for now
+        elementsSelectable={true} // Allow selecting elements
+        selectNodesOnDrag={false} // Don't select on drag (allows node movement)
         // Selection Configuration
-        selectionOnDrag         // Box selection with drag (no modifier needed)
         multiSelectionKeyCode="Shift" // Shift for multi-selection
         // Performance Optimizations
         onlyRenderVisibleElements={true} // Viewport culling for large graphs

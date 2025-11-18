@@ -120,6 +120,18 @@ html[data-theme="dark"] body {
   opacity: 0.7;
 }
 
+.react-flow__minimap {
+  z-index: 5 !important;
+}
+
+.react-flow__controls {
+  z-index: 5 !important;
+}
+
+.react-flow__panel {
+  z-index: 10 !important;
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;

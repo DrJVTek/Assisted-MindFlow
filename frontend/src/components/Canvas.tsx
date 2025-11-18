@@ -261,11 +261,15 @@ function CanvasInner() {
   }
 
   return (
-    <div style={{
-      width: '100%',
-      height: '100vh',
-      touchAction: 'none', // Prevent browser default touch behaviors
-    }}>
+    <div
+      style={{
+        width: '100%',
+        height: '100vh',
+        touchAction: 'none', // Prevent browser default touch behaviors
+      }}
+      role="application"
+      aria-label="Interactive node canvas for reasoning graphs"
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -309,6 +313,8 @@ function CanvasInner() {
             maskColor="rgba(0, 0, 0, 0.1)"
             position="bottom-right"
             style={{ marginBottom: 50 }}
+            zoomable
+            pannable
           />
         )}
 

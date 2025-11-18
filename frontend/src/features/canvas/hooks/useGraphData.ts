@@ -28,7 +28,12 @@ export function useGraphData(graphId: string | null) {
       return;
     }
 
-    const fetchGraph = async () => {
+    // Skip fetch if we already have data for this graph (cache)
+    if (graphData && graphData.id === graphId) {
+      return;
+    }
+
+    const fetchGraph = async (retries = 3) => {
       try {
         setLoading(true);
         setError(null);
@@ -36,17 +41,24 @@ export function useGraphData(graphId: string | null) {
         const graph = await api.getGraph(graphId);
         setGraphData(graph);
       } catch (error) {
+        // Retry logic for network errors
+        if (retries > 0) {
+          console.warn(`Retrying graph fetch (${retries} attempts left)...`);
+          setTimeout(() => fetchGraph(retries - 1), 1000);
+          return;
+        }
+
         const message =
           error instanceof Error ? error.message : 'Failed to load graph data';
         setError(message);
-        console.error('Failed to fetch graph:', error);
+        console.error('Failed to fetch graph after retries:', error);
       } finally {
         setLoading(false);
       }
     };
 
     fetchGraph();
-  }, [graphId, setGraphData, setLoading, setError]);
+  }, [graphId, setGraphData, setLoading, setError, graphData]);
 
   return { graphData, isLoading, error };
 }

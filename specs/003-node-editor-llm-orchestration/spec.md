@@ -69,7 +69,40 @@ Unaffected: Q1, A1 (upstream nodes unchanged)
 
 ---
 
-### User Story 3 - Version History and Rollback (Priority: P1)
+### User Story 3 - Canvas Interactions & Organization (Priority: P0)
+
+**As a user**, I want to drag nodes, create groups, add comments, and use multi-selection, **so that** I can organize my reasoning graph efficiently.
+
+**Acceptance Scenarios**:
+
+1. **Given** a node on canvas, **When** I double-click it, **Then** the node editor modal opens
+2. **Given** a node on canvas, **When** I drag it with left mouse button, **Then** it moves to the new position and position is saved
+3. **Given** empty canvas space, **When** I hold Shift and drag, **Then** I create a selection box
+4. **Given** multiple nodes, **When** I Shift+click each, **Then** they are all selected
+5. **Given** selected nodes, **When** I right-click and select "Create Group", **Then** a group container is created around them
+6. **Given** canvas, **When** I right-click empty space and select "Add Comment", **Then** a comment box appears for annotation
+7. **Given** a comment, **When** I drag its corners, **Then** it resizes
+8. **Given** canvas, **When** I middle-mouse-drag or right-mouse-drag, **Then** the canvas pans
+
+**UI Requirements**:
+- Node dragging enabled with left mouse button
+- Double-click on node opens editor (not fit-to-view)
+- Selection box on Shift+Drag
+- Multi-selection with Shift+Click
+- Context menu actions:
+  - Canvas: "Add Node", "Add Comment", "Create Group from Selection"
+  - Node: "Edit", "Delete", "Add Child", "View History"
+  - Group: "Ungroup", "Edit Title", "Change Color"
+- Visual feedback: selected nodes have blue outline, groups have colored background
+
+**Position Persistence**:
+- Save node position to backend on drag end
+- Save group bounds to backend
+- Save comment position/size to backend
+
+---
+
+### User Story 4 - Version History and Rollback (Priority: P1)
 
 **As a user**, I want to see previous versions of node content after regeneration, **so that** I can compare old vs new responses and rollback if needed.
 

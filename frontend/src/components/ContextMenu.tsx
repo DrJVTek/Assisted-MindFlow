@@ -7,7 +7,7 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { Plus, Settings, Edit2, Trash2, GitBranch, History } from 'lucide-react';
+import { Plus, Settings, Edit2, Trash2, GitBranch, History, MessageSquare, Layers } from 'lucide-react';
 
 export type ContextMenuType = 'canvas' | 'node';
 
@@ -26,6 +26,8 @@ interface ContextMenuProps {
   type: ContextMenuType;
   onClose: () => void;
   onAddNode?: () => void;
+  onAddComment?: () => void;
+  onCreateGroup?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   onAddChild?: () => void;
@@ -39,6 +41,8 @@ export function ContextMenu({
   type,
   onClose,
   onAddNode,
+  onAddComment,
+  onCreateGroup,
   onEdit,
   onDelete,
   onAddChild,
@@ -88,16 +92,43 @@ export function ContextMenu({
   // Build menu actions based on type
   const actions: ContextMenuAction[] = [];
 
-  if (type === 'canvas' && onAddNode) {
-    actions.push({
-      id: 'add-node',
-      label: 'Add Node',
-      icon: <Plus size={16} />,
-      onClick: () => {
-        onAddNode();
-        onClose();
-      },
-    });
+  if (type === 'canvas') {
+    if (onAddNode) {
+      actions.push({
+        id: 'add-node',
+        label: 'Add Node',
+        icon: <Plus size={16} />,
+        onClick: () => {
+          onAddNode();
+          onClose();
+        },
+      });
+    }
+
+    if (onAddComment) {
+      actions.push({
+        id: 'add-comment',
+        label: 'Add Comment',
+        icon: <MessageSquare size={16} />,
+        onClick: () => {
+          onAddComment();
+          onClose();
+        },
+      });
+    }
+
+    if (onCreateGroup) {
+      actions.push({
+        id: 'create-group',
+        label: 'Create Group',
+        icon: <Layers size={16} />,
+        onClick: () => {
+          onCreateGroup();
+          onClose();
+        },
+        dividerAfter: true,
+      });
+    }
   }
 
   if (type === 'node') {

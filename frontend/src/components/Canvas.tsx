@@ -182,6 +182,31 @@ function CanvasInner() {
     [selectNode]
   );
 
+  // Handle node double-click (open editor)
+  const onNodeDoubleClick = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      setNodeBeingEdited(node.id);
+      setNodeEditorOpen(true);
+    },
+    []
+  );
+
+  // Handle node drag end (save position)
+  const onNodeDragStop = useCallback(
+    async (_event: React.MouseEvent, node: Node) => {
+      try {
+        // Save position to backend
+        await api.updateNode(graphId, node.id, {
+          // Position will be added to update API
+        });
+        console.log(`Node ${node.id} position saved:`, node.position);
+      } catch (error) {
+        console.error('Error saving node position:', error);
+      }
+    },
+    [graphId]
+  );
+
   // Handle canvas click (deselect)
   const onPaneClick = useCallback(() => {
     selectNode(null);
@@ -224,7 +249,20 @@ function CanvasInner() {
   const handleAddNode = useCallback(() => {
     setNodeCreatorParentId(undefined);
     setNodeCreatorOpen(true);
-  }, []);
+    closeContextMenu();
+  }, [closeContextMenu]);
+
+  const handleAddComment = useCallback(() => {
+    console.log('Add Comment clicked - Not yet implemented');
+    // TODO: Implement comment creation
+    closeContextMenu();
+  }, [closeContextMenu]);
+
+  const handleCreateGroup = useCallback(() => {
+    console.log('Create Group clicked - Not yet implemented');
+    // TODO: Implement group creation from selected nodes
+    closeContextMenu();
+  }, [closeContextMenu]);
 
   const handleEditNode = useCallback(() => {
     if (contextMenu?.nodeId) {
@@ -456,6 +494,8 @@ function CanvasInner() {
         edges={edges}
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
+        onNodeDoubleClick={onNodeDoubleClick}
+        onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
         onDoubleClick={onDoubleClick}
         onMove={onMove}
@@ -466,12 +506,17 @@ function CanvasInner() {
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
         fitView={preferences.autoFitOnLoad}
         // Touch & Mouse Configuration
-        panOnDrag={true}        // Enables mouse drag and single-finger pan on touch devices
+        panOnDrag={[1, 2]}      // Middle/right mouse button for panning (left for node drag)
         panOnScroll={false}     // Disabled: scroll is used for zoom (better UX)
         zoomOnScroll={true}     // Mouse wheel zoom on desktop
         zoomOnPinch={true}      // Pinch-to-zoom on touch devices
-        zoomOnDoubleClick={false} // Disabled: reserved for fit-to-view
+        zoomOnDoubleClick={false} // Disabled: node double-click opens editor
         selectNodesOnDrag={false} // Prevents accidental selection during pan
+        nodesDraggable={true}    // Enable node dragging
+        nodesConnectable={false} // Disable edge creation for now
+        // Selection Configuration
+        selectionOnDrag={true}   // Enable box selection with Shift+Drag
+        multiSelectionKeyCode="Shift" // Shift for multi-selection
         // Performance Optimizations
         onlyRenderVisibleElements={true} // Viewport culling for large graphs
         attributionPosition="bottom-right"
@@ -575,6 +620,8 @@ function CanvasInner() {
           type={contextMenu.type}
           onClose={closeContextMenu}
           onAddNode={contextMenu.type === 'canvas' ? handleAddNode : undefined}
+          onAddComment={contextMenu.type === 'canvas' ? handleAddComment : undefined}
+          onCreateGroup={contextMenu.type === 'canvas' ? handleCreateGroup : undefined}
           onEdit={contextMenu.type === 'node' ? handleEditNode : undefined}
           onDelete={contextMenu.type === 'node' ? handleDeleteNode : undefined}
           onAddChild={contextMenu.type === 'node' ? handleAddChildNode : undefined}

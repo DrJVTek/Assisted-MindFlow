@@ -32,6 +32,9 @@ import { transformGraphToReactFlow } from '../features/canvas/utils/transform';
 import { MIN_ZOOM, MAX_ZOOM, formatZoomPercentage } from '../features/canvas/utils/viewport';
 import { CustomNode } from './Node';
 import { SettingsPanel } from './SettingsPanel';
+import { ContextMenu, ContextMenuType } from './ContextMenu';
+import { NodeCreator } from './NodeCreator';
+import { api } from '../services/api';
 
 // Lazy load DetailPanel for better performance
 const DetailPanel = lazy(() => import('./DetailPanel').then(module => ({ default: module.DetailPanel })));
@@ -73,6 +76,19 @@ function CanvasInner() {
   const [currentZoom, setCurrentZoom] = useState(1.0);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const reactFlowInstance = useReactFlow();
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    type: ContextMenuType;
+    nodeId?: string;
+  } | null>(null);
+
+  // Node creator state
+  const [nodeCreatorOpen, setNodeCreatorOpen] = useState(false);
+  const [nodeCreatorParentId, setNodeCreatorParentId] = useState<string | undefined>(undefined);
 
   // TODO: Get graphId from route params or props (hardcoded for now)
   const graphId = '550e8400-e29b-41d4-a716-446655440000'; // Demo graph UUID
@@ -161,6 +177,102 @@ function CanvasInner() {
   const onDoubleClick = useCallback(() => {
     fitView();
   }, [fitView]);
+
+  // Handle canvas right-click (context menu)
+  const onPaneContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: event.clientX,
+      y: event.clientY,
+      type: 'canvas',
+    });
+  }, []);
+
+  // Handle node right-click (context menu)
+  const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
+    event.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: event.clientX,
+      y: event.clientY,
+      type: 'node',
+      nodeId: node.id,
+    });
+  }, []);
+
+  // Close context menu
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  // Context menu action handlers
+  const handleAddNode = useCallback(() => {
+    setNodeCreatorParentId(undefined);
+    setNodeCreatorOpen(true);
+  }, []);
+
+  const handleEditNode = useCallback(() => {
+    if (contextMenu?.nodeId) {
+      console.log('Edit Node clicked for:', contextMenu.nodeId);
+      // TODO: Open NodeEditor modal
+    }
+  }, [contextMenu]);
+
+  const handleDeleteNode = useCallback(() => {
+    if (contextMenu?.nodeId) {
+      console.log('Delete Node clicked for:', contextMenu.nodeId);
+      // TODO: Implement delete confirmation and API call
+    }
+  }, [contextMenu]);
+
+  const handleAddChildNode = useCallback(() => {
+    if (contextMenu?.nodeId) {
+      setNodeCreatorParentId(contextMenu.nodeId);
+      setNodeCreatorOpen(true);
+    }
+  }, [contextMenu]);
+
+  const handleViewHistory = useCallback(() => {
+    if (contextMenu?.nodeId) {
+      console.log('View History clicked for:', contextMenu.nodeId);
+      // TODO: Open VersionHistory panel
+    }
+  }, [contextMenu]);
+
+  // Handle node creation
+  const handleSaveNode = useCallback(
+    async (nodeData: {
+      type: string;
+      content: string;
+      importance: number;
+      tags: string[];
+      status: string;
+      parentId?: string;
+    }) => {
+      try {
+        console.log('Creating node via API:', nodeData);
+
+        const createdNode = await api.createNode(graphId, {
+          type: nodeData.type,
+          content: nodeData.content,
+          importance: nodeData.importance,
+          tags: nodeData.tags,
+          status: nodeData.status,
+          parent_ids: nodeData.parentId ? [nodeData.parentId] : [],
+        });
+
+        console.log('Node created successfully:', createdNode);
+
+        // Force reload graph data to show the new node
+        window.location.reload();
+      } catch (error) {
+        console.error('Error creating node:', error);
+        alert(`Error creating node: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    },
+    [graphId]
+  );
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -278,6 +390,8 @@ function CanvasInner() {
         onPaneClick={onPaneClick}
         onDoubleClick={onDoubleClick}
         onMove={onMove}
+        onPaneContextMenu={onPaneContextMenu}
+        onNodeContextMenu={onNodeContextMenu}
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
@@ -382,6 +496,31 @@ function CanvasInner() {
       {/* Settings Panel */}
       {settingsPanelOpen && (
         <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
+      )}
+
+      {/* Context Menu */}
+      {contextMenu && contextMenu.visible && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          type={contextMenu.type}
+          onClose={closeContextMenu}
+          onAddNode={contextMenu.type === 'canvas' ? handleAddNode : undefined}
+          onEdit={contextMenu.type === 'node' ? handleEditNode : undefined}
+          onDelete={contextMenu.type === 'node' ? handleDeleteNode : undefined}
+          onAddChild={contextMenu.type === 'node' ? handleAddChildNode : undefined}
+          onViewHistory={contextMenu.type === 'node' ? handleViewHistory : undefined}
+          onSettings={contextMenu.type === 'canvas' ? () => setSettingsPanelOpen(true) : undefined}
+        />
+      )}
+
+      {/* Node Creator Modal */}
+      {nodeCreatorOpen && (
+        <NodeCreator
+          onClose={() => setNodeCreatorOpen(false)}
+          onSave={handleSaveNode}
+          parentId={nodeCreatorParentId}
+        />
       )}
     </div>
   );

@@ -103,6 +103,48 @@ export const api = {
     const response = await apiClient.get(`/graphs/${graphId}/viewport`);
     return response.data;
   },
+
+  /**
+   * Create a new node
+   */
+  createNode: async (
+    graphId: string,
+    nodeData: {
+      type: string;
+      content: string;
+      importance: number;
+      tags: string[];
+      status: string;
+      parent_ids?: string[];
+    }
+  ): Promise<any> => {
+    const response = await apiClient.post(`/graphs/${graphId}/nodes`, nodeData);
+    return response.data;
+  },
+
+  /**
+   * Update an existing node
+   */
+  updateNode: async (
+    graphId: string,
+    nodeId: string,
+    updates: {
+      content?: string;
+      importance?: number;
+      tags?: string[];
+      status?: string;
+    }
+  ): Promise<any> => {
+    const response = await apiClient.put(`/graphs/${graphId}/nodes/${nodeId}`, updates);
+    return response.data;
+  },
+
+  /**
+   * Delete a node
+   */
+  deleteNode: async (graphId: string, nodeId: string): Promise<void> => {
+    await apiClient.delete(`/graphs/${graphId}/nodes/${nodeId}`);
+  },
 };
 
 export default api;

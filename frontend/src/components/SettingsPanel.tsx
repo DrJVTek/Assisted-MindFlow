@@ -45,11 +45,18 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   });
 
   const [llmSaveIndicator, setLLMSaveIndicator] = useState<string | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
 
   // Auto-save LLM config to localStorage
   useEffect(() => {
     localStorage.setItem('mindflow_llm_config', JSON.stringify(llmConfig));
   }, [llmConfig]);
+
+  // Fetch available models when provider changes
+  useEffect(() => {
+    fetchAvailableModels();
+  }, [llmConfig.provider, llmConfig.baseUrl, llmConfig.apiKey]);
 
   const toggleTheme = () => {
     updatePreferences({ theme: preferences.theme === 'light' ? 'dark' : 'light' });
@@ -72,32 +79,144 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const testLLMConnection = async () => {
     setLLMSaveIndicator('Testing...');
 
-    // Simulate test for now - later integrate with actual LLM API
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    try {
+      switch (llmConfig.provider) {
+        case 'ollama': {
+          const baseUrl = llmConfig.baseUrl || 'http://localhost:11434';
+          const response = await fetch(`${baseUrl}/api/tags`);
+          if (response.ok) {
+            setLLMSaveIndicator('Connection successful!');
+          } else {
+            setLLMSaveIndicator('Error: Cannot connect to Ollama');
+          }
+          break;
+        }
 
-    if (!llmConfig.apiKey) {
-      setLLMSaveIndicator('Error: API key required');
-      setTimeout(() => setLLMSaveIndicator(null), 3000);
-      return;
+        case 'openai': {
+          if (!llmConfig.apiKey) {
+            setLLMSaveIndicator('Error: API key required');
+            setTimeout(() => setLLMSaveIndicator(null), 3000);
+            return;
+          }
+          const response = await fetch('https://api.openai.com/v1/models', {
+            headers: { 'Authorization': `Bearer ${llmConfig.apiKey}` },
+          });
+          if (response.ok) {
+            setLLMSaveIndicator('Connection successful!');
+          } else {
+            setLLMSaveIndicator('Error: Invalid API key');
+          }
+          break;
+        }
+
+        case 'anthropic': {
+          if (!llmConfig.apiKey) {
+            setLLMSaveIndicator('Error: API key required');
+            setTimeout(() => setLLMSaveIndicator(null), 3000);
+            return;
+          }
+          // Anthropic doesn't have a simple test endpoint, just validate key format
+          if (llmConfig.apiKey.startsWith('sk-ant-')) {
+            setLLMSaveIndicator('API key format valid');
+          } else {
+            setLLMSaveIndicator('Warning: Key format unexpected');
+          }
+          break;
+        }
+
+        case 'custom': {
+          if (!llmConfig.baseUrl) {
+            setLLMSaveIndicator('Error: Base URL required');
+            setTimeout(() => setLLMSaveIndicator(null), 3000);
+            return;
+          }
+          setLLMSaveIndicator('Config saved');
+          break;
+        }
+      }
+    } catch (error) {
+      setLLMSaveIndicator(`Error: ${error instanceof Error ? error.message : 'Connection failed'}`);
     }
 
-    setLLMSaveIndicator('Connection successful!');
     setTimeout(() => setLLMSaveIndicator(null), 3000);
   };
 
-  // Get available models based on provider
-  const getModelsForProvider = (provider: LLMProvider): string[] => {
-    switch (provider) {
-      case 'openai':
-        return ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo'];
-      case 'anthropic':
-        return ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'];
-      case 'ollama':
-        return ['llama2', 'mistral', 'codellama', 'mixtral'];
-      case 'custom':
-        return ['custom-model'];
-      default:
-        return [];
+  // Fetch available models from provider API
+  const fetchAvailableModels = async () => {
+    setLoadingModels(true);
+    try {
+      let models: string[] = [];
+
+      switch (llmConfig.provider) {
+        case 'ollama': {
+          // Fetch models from Ollama API
+          const baseUrl = llmConfig.baseUrl || 'http://localhost:11434';
+          try {
+            const response = await fetch(`${baseUrl}/api/tags`);
+            if (response.ok) {
+              const data = await response.json();
+              models = data.models?.map((m: any) => m.name) || [];
+            } else {
+              // Fallback to common models if API fails
+              models = ['llama2', 'mistral', 'codellama', 'mixtral'];
+            }
+          } catch (error) {
+            console.warn('Failed to fetch Ollama models:', error);
+            models = ['llama2', 'mistral', 'codellama', 'mixtral'];
+          }
+          break;
+        }
+
+        case 'openai': {
+          // Fetch models from OpenAI API
+          if (llmConfig.apiKey) {
+            try {
+              const response = await fetch('https://api.openai.com/v1/models', {
+                headers: {
+                  'Authorization': `Bearer ${llmConfig.apiKey}`,
+                },
+              });
+              if (response.ok) {
+                const data = await response.json();
+                models = data.data
+                  ?.filter((m: any) => m.id.includes('gpt'))
+                  ?.map((m: any) => m.id)
+                  ?.sort() || [];
+              } else {
+                // Fallback to known models
+                models = ['gpt-4', 'gpt-4-turbo', 'gpt-4o', 'gpt-3.5-turbo'];
+              }
+            } catch (error) {
+              console.warn('Failed to fetch OpenAI models:', error);
+              models = ['gpt-4', 'gpt-4-turbo', 'gpt-4o', 'gpt-3.5-turbo'];
+            }
+          } else {
+            // No API key, use defaults
+            models = ['gpt-4', 'gpt-4-turbo', 'gpt-4o', 'gpt-3.5-turbo'];
+          }
+          break;
+        }
+
+        case 'anthropic': {
+          // Anthropic doesn't have a list models endpoint, use known models
+          models = ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'];
+          break;
+        }
+
+        case 'custom': {
+          models = ['custom-model'];
+          break;
+        }
+      }
+
+      setAvailableModels(models);
+
+      // Update selected model if current one is not in the list
+      if (models.length > 0 && !models.includes(llmConfig.model)) {
+        setLLMConfig({ ...llmConfig, model: models[0] });
+      }
+    } finally {
+      setLoadingModels(false);
     }
   };
 
@@ -225,11 +344,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 value={llmConfig.provider}
                 onChange={(e) => {
                   const provider = e.target.value as LLMProvider;
-                  const models = getModelsForProvider(provider);
                   setLLMConfig({
                     ...llmConfig,
                     provider,
-                    model: models[0] || '',
+                    model: '',
                   });
                 }}
                 style={{
@@ -315,20 +433,36 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
             {/* Model Selection */}
             <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  color: 'var(--node-text)',
-                  marginBottom: 'var(--spacing-sm)',
-                }}
-              >
-                Model
-              </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--spacing-sm)' }}>
+                <label
+                  style={{
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: 'var(--node-text)',
+                  }}
+                >
+                  Model {loadingModels && <span style={{ color: 'var(--node-text-secondary)', fontSize: '12px' }}>(Loading...)</span>}
+                </label>
+                <button
+                  onClick={fetchAvailableModels}
+                  disabled={loadingModels}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: '12px',
+                    borderRadius: '4px',
+                    border: '1px solid var(--panel-border)',
+                    backgroundColor: 'transparent',
+                    color: 'var(--primary-color)',
+                    cursor: loadingModels ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Refresh
+                </button>
+              </div>
               <select
                 value={llmConfig.model}
                 onChange={(e) => setLLMConfig({ ...llmConfig, model: e.target.value })}
+                disabled={loadingModels || availableModels.length === 0}
                 style={{
                   width: '100%',
                   padding: 'var(--spacing-md)',
@@ -337,13 +471,18 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   border: '1px solid var(--panel-border)',
                   backgroundColor: 'var(--panel-bg)',
                   color: 'var(--node-text)',
+                  cursor: loadingModels ? 'wait' : 'pointer',
                 }}
               >
-                {getModelsForProvider(llmConfig.provider).map((model) => (
-                  <option key={model} value={model}>
-                    {model}
-                  </option>
-                ))}
+                {availableModels.length === 0 ? (
+                  <option value="">No models available</option>
+                ) : (
+                  availableModels.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 

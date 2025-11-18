@@ -155,6 +155,7 @@ export function visualNodeToReactFlowNode(visualNode: VisualNode): any {
     id: visualNode.nodeId,
     type: 'custom', // Use custom node component
     position: visualNode.position,
+    draggable: true, // Enable node dragging with left mouse button
     data: {
       nodeId: visualNode.nodeId,
       preview: visualNode.preview,

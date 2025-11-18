@@ -197,7 +197,10 @@ function CanvasInner() {
       try {
         // Save position to backend
         await api.updateNode(graphId, node.id, {
-          // Position will be added to update API
+          position: {
+            x: node.position.x,
+            y: node.position.y,
+          },
         });
         console.log(`Node ${node.id} position saved:`, node.position);
       } catch (error) {
@@ -511,11 +514,10 @@ function CanvasInner() {
         zoomOnScroll={true}     // Mouse wheel zoom on desktop
         zoomOnPinch={true}      // Pinch-to-zoom on touch devices
         zoomOnDoubleClick={false} // Disabled: node double-click opens editor
-        selectNodesOnDrag={false} // Prevents accidental selection during pan
-        nodesDraggable={true}    // Enable node dragging
-        nodesConnectable={false} // Disable edge creation for now
+        nodesDraggable={true}     // Enable node dragging with left mouse button
+        nodesConnectable={false}  // Disable edge creation for now
         // Selection Configuration
-        selectionOnDrag={true}   // Enable box selection with Shift+Drag
+        selectionOnDrag         // Box selection with drag (no modifier needed)
         multiSelectionKeyCode="Shift" // Shift for multi-selection
         // Performance Optimizations
         onlyRenderVisibleElements={true} // Viewport culling for large graphs

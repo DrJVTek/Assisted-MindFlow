@@ -163,7 +163,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
           ? '0 4px 8px rgba(0, 0, 0, 0.1)'
           : '0 2px 4px rgba(0, 0, 0, 0.05)',
         transition: 'all 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease',
-        cursor: 'pointer',
+        cursor: 'move',
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >

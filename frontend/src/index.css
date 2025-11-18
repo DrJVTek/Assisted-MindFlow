@@ -79,21 +79,24 @@ button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
 
-/* Dark Mode */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --canvas-bg: #1A1A1A;
-    --canvas-grid: #2D2D2D;
-    --node-bg: #2D2D2D;
-    --node-border: #424242;
-    --node-text: #E0E0E0;
-    --node-text-secondary: #B0B0B0;
-    --node-hover-shadow: rgba(255, 255, 255, 0.1);
-    --primary-color: #42A5F5;
-    --primary-hover: #64B5F6;
-    --panel-bg: #2D2D2D;
-    --panel-border: #424242;
-  }
+/* Dark Mode - Applied via data-theme attribute */
+html[data-theme="dark"] {
+  --canvas-bg: #1A1A1A;
+  --canvas-grid: #2D2D2D;
+  --node-bg: #2D2D2D;
+  --node-border: #424242;
+  --node-text: #E0E0E0;
+  --node-text-secondary: #B0B0B0;
+  --node-hover-shadow: rgba(255, 255, 255, 0.1);
+  --primary-color: #42A5F5;
+  --primary-hover: #64B5F6;
+  --panel-bg: #2D2D2D;
+  --panel-border: #424242;
+}
+
+html[data-theme="dark"] body {
+  background-color: var(--canvas-bg);
+  color: var(--node-text);
 }
 
 /* Node Hover Effects */

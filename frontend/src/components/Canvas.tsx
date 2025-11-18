@@ -22,6 +22,7 @@ import ReactFlow, {
   Panel,
   useReactFlow,
 } from 'reactflow';
+import { Settings } from 'lucide-react';
 import 'reactflow/dist/style.css';
 
 import { useCanvasStore } from '../stores/canvasStore';
@@ -30,6 +31,7 @@ import { useViewport } from '../features/canvas/hooks/useViewport';
 import { transformGraphToReactFlow } from '../features/canvas/utils/transform';
 import { MIN_ZOOM, MAX_ZOOM, formatZoomPercentage } from '../features/canvas/utils/viewport';
 import { CustomNode } from './Node';
+import { SettingsPanel } from './SettingsPanel';
 
 // Lazy load DetailPanel for better performance
 const DetailPanel = lazy(() => import('./DetailPanel').then(module => ({ default: module.DetailPanel })));
@@ -69,6 +71,7 @@ export function Canvas() {
 function CanvasInner() {
   const { selectNode, preferences, selectedNodeId } = useCanvasStore();
   const [currentZoom, setCurrentZoom] = useState(1.0);
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const reactFlowInstance = useReactFlow();
 
   // TODO: Get graphId from route params or props (hardcoded for now)
@@ -79,6 +82,11 @@ function CanvasInner() {
 
   // Viewport management with persistence
   const { saveViewport, fitView, zoomIn, zoomOut } = useViewport(graphId);
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', preferences.theme);
+  }, [preferences.theme]);
 
   // Transform graph data to React Flow format with edge emphasis and zoom-based detail level
   const { nodes, edges } = useMemo(() => {
@@ -306,14 +314,40 @@ function CanvasInner() {
 
         {/* Zoom level display */}
         <Panel position="top-left" style={{
-          backgroundColor: 'white',
+          backgroundColor: 'var(--panel-bg)',
           padding: '8px 12px',
           borderRadius: '4px',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
           fontSize: '14px',
           fontWeight: 500,
+          color: 'var(--node-text)',
         }}>
           {formatZoomPercentage(currentZoom)}
+        </Panel>
+
+        {/* Settings button */}
+        <Panel position="top-right" style={{
+          backgroundColor: 'var(--panel-bg)',
+          padding: '8px',
+          borderRadius: '4px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          cursor: 'pointer',
+        }}>
+          <button
+            onClick={() => setSettingsPanelOpen(true)}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              color: 'var(--node-text-secondary)',
+            }}
+            aria-label="Open settings"
+          >
+            <Settings size={20} />
+          </button>
         </Panel>
       </ReactFlow>
 
@@ -337,6 +371,11 @@ function CanvasInner() {
             onClose={() => selectNode(null)}
           />
         </Suspense>
+      )}
+
+      {/* Settings Panel */}
+      {settingsPanelOpen && (
+        <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
       )}
     </div>
   );

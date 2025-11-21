@@ -1,0 +1,917 @@
+openapi: 3.0.3
+
+info:
+  title: Concurrent LLM Operations API
+  description: |
+    REST API for managing concurrent LLM streaming operations with hierarchical node creation.
+    Supports queuing, streaming, and real-time state synchronization for AI-assisted workflows.
+  version: 1.0.0
+  contact:
+    name: MindFlow Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development server
+  - url: http://localhost:8000/api/v1
+    description: Versioned API endpoint (recommended)
+
+tags:
+  - name: operations
+    description: LLM operation lifecycle management
+  - name: streaming
+    description: Server-Sent Events (SSE) for real-time operation updates
+  - name: status
+    description: Query operation status and history
+
+paths:
+  /llm-operations:
+    post:
+      summary: Create new LLM operation
+      description: |
+        Initiates a new LLM operation for content generation with hierarchical node creation.
+        The operation is queued if the concurrency limit is reached. Returns operation_id
+        for tracking via streaming endpoint.
+      operationId: createLLMOperation
+      tags:
+        - operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOperationRequest'
+            examples:
+              openai:
+                summary: OpenAI operation
+                value:
+                  node_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                  graph_id: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                  provider: "openai"
+                  model: "gpt-4-turbo"
+                  prompt: "Explain quantum computing in simple terms"
+                  system_prompt: "You are a helpful AI assistant explaining complex topics."
+              anthropic:
+                summary: Anthropic Claude operation
+                value:
+                  node_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                  graph_id: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                  provider: "anthropic"
+                  model: "claude-3-opus"
+                  prompt: "What are the implications of quantum entanglement?"
+              ollama:
+                summary: Ollama local LLM operation
+                value:
+                  node_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                  graph_id: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                  provider: "ollama"
+                  model: "mistral"
+                  prompt: "Generate a creative story about AI"
+      responses:
+        '201':
+          description: Operation created successfully (queued or processing)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateOperationResponse'
+              example:
+                operation_id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                status: "queued"
+                queue_position: 2
+                estimated_wait_seconds: 45
+        '400':
+          description: Invalid request data (missing fields, invalid provider, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "VALIDATION_ERROR"
+                message: "Invalid provider 'gemini'. Allowed values: openai, anthropic, ollama"
+                details:
+                  field: "provider"
+                  value: "gemini"
+        '404':
+          description: Node or graph not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "NOT_FOUND"
+                message: "Graph with ID b2c3d4e5-f6a7-8901-bcde-f12345678901 not found"
+        '429':
+          description: Global operation limit exceeded (queue full)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "QUEUE_FULL"
+                message: "Operation queue is full. Please try again later."
+                details:
+                  queue_size: 100
+                  max_queue_size: 100
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: List all LLM operations
+      description: |
+        Retrieve list of LLM operations with optional filtering by status, graph, node, or user.
+        Supports pagination for large result sets.
+      operationId: listLLMOperations
+      tags:
+        - operations
+      parameters:
+        - name: graph_id
+          in: query
+          required: false
+          description: Filter by parent graph UUID
+          schema:
+            type: string
+            format: uuid
+        - name: node_id
+          in: query
+          required: false
+          description: Filter by target node UUID
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          description: Filter by operation status
+          schema:
+            type: string
+            enum:
+              - queued
+              - processing
+              - streaming
+              - completed
+              - failed
+              - cancelled
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of operations to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          description: Number of operations to skip (pagination)
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Operations retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationsList'
+              example:
+                operations:
+                  - operation_id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                    status: "streaming"
+                    progress: 45
+                    node_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    graph_id: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                    provider: "openai"
+                    model: "gpt-4-turbo"
+                    queued_at: "2025-11-21T10:30:00Z"
+                    started_at: "2025-11-21T10:30:15Z"
+                total: 42
+                limit: 20
+                offset: 0
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /llm-operations/{operation_id}:
+    get:
+      summary: Get operation status
+      description: |
+        Retrieve current status and metadata for a specific LLM operation.
+        Includes queue position if queued, error details if failed.
+      operationId: getOperationStatus
+      tags:
+        - status
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          description: UUID of the LLM operation
+          schema:
+            type: string
+            format: uuid
+          example: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+      responses:
+        '200':
+          description: Operation status retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationStatusResponse'
+              examples:
+                queued:
+                  summary: Operation in queue
+                  value:
+                    operation_id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                    status: "queued"
+                    progress: 0
+                    queue_position: 3
+                    estimated_wait_seconds: 60
+                processing:
+                  summary: Operation processing
+                  value:
+                    operation_id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                    status: "processing"
+                    progress: 10
+                streaming:
+                  summary: Operation streaming
+                  value:
+                    operation_id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                    status: "streaming"
+                    progress: 65
+                completed:
+                  summary: Operation completed
+                  value:
+                    operation_id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                    status: "completed"
+                    progress: 100
+                failed:
+                  summary: Operation failed
+                  value:
+                    operation_id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                    status: "failed"
+                    progress: 50
+                    error_message: "API rate limit exceeded. Please retry after 60 seconds."
+        '404':
+          description: Operation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "NOT_FOUND"
+                message: "Operation with ID c3d4e5f6-a7b8-9012-cdef-123456789012 not found"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Cancel LLM operation
+      description: |
+        Cancel an active LLM operation (queued, processing, or streaming).
+        Completed or failed operations cannot be cancelled.
+        Returns error if operation cannot be cancelled.
+      operationId: cancelLLMOperation
+      tags:
+        - operations
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          description: UUID of the operation to cancel
+          schema:
+            type: string
+            format: uuid
+          example: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+      responses:
+        '200':
+          description: Operation cancelled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - operation_id
+                  - status
+                  - message
+                properties:
+                  operation_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: ["cancelled"]
+                  message:
+                    type: string
+              example:
+                operation_id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                status: "cancelled"
+                message: "Operation cancelled successfully"
+        '404':
+          description: Operation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Operation cannot be cancelled (already completed/failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "INVALID_STATE"
+                message: "Cannot cancel operation with status 'completed'"
+                details:
+                  current_status: "completed"
+                  allowed_statuses: ["queued", "processing", "streaming"]
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /llm-operations/{operation_id}/stream:
+    get:
+      summary: Stream operation updates (SSE)
+      description: |
+        Server-Sent Events endpoint for real-time streaming of LLM operation content and status updates.
+
+        **Event Types:**
+        - `queued`: Operation entered queue (includes queue_position)
+        - `progress`: Progress update (0-100)
+        - `content`: Streamed content chunk
+        - `complete`: Operation completed (includes final_content and created node)
+        - `error`: Operation failed with error message
+
+        **Connection Details:**
+        - Automatically reconnects on network failures (client-side)
+        - Stream remains open for 24 hours
+        - Auto-closes 5 seconds after operation completion
+        - Send keep-alive ping every 30 seconds if idle
+      operationId: streamLLMOperation
+      tags:
+        - streaming
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          description: UUID of the operation to stream
+          schema:
+            type: string
+            format: uuid
+          example: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+      responses:
+        '200':
+          description: SSE stream established successfully
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/StreamingChunk'
+              examples:
+                queued_event:
+                  summary: Operation queued event
+                  value: |
+                    event: queued
+                    data: {"type":"queued","operation_id":"c3d4e5f6-a7b8-9012-cdef-123456789012","queue_position":2,"estimated_wait_seconds":45}
+                progress_event:
+                  summary: Progress update event
+                  value: |
+                    event: progress
+                    data: {"type":"progress","operation_id":"c3d4e5f6-a7b8-9012-cdef-123456789012","progress":35}
+                content_event:
+                  summary: Content chunk event
+                  value: |
+                    event: content
+                    data: {"type":"content","operation_id":"c3d4e5f6-a7b8-9012-cdef-123456789012","content":"Quantum computing leverages the principles"}
+                complete_event:
+                  summary: Operation complete event
+                  value: |
+                    event: complete
+                    data: {"type":"complete","operation_id":"c3d4e5f6-a7b8-9012-cdef-123456789012","final_content":"Quantum computing leverages the principles of quantum mechanics...","node":{"id":"node-123","type":"answer","content":"Quantum computing...","created_at":"2025-11-21T10:32:45Z"}}
+                error_event:
+                  summary: Operation error event
+                  value: |
+                    event: error
+                    data: {"type":"error","operation_id":"c3d4e5f6-a7b8-9012-cdef-123456789012","error":"API rate limit exceeded. Please retry after 60 seconds."}
+        '400':
+          description: Invalid operation_id format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Operation not found
+          content:
+            text/event-stream:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    enum: ["error"]
+                  operation_id:
+                    type: string
+                  error:
+                    type: string
+              example: |
+                event: error
+                data: {"type":"error","operation_id":"c3d4e5f6-a7b8-9012-cdef-123456789012","error":"Operation not found"}
+        '500':
+          description: Server error during streaming
+          content:
+            text/event-stream:
+              schema:
+                type: object
+              example: |
+                event: error
+                data: {"type":"error","operation_id":"c3d4e5f6-a7b8-9012-cdef-123456789012","error":"Internal server error"}
+
+components:
+  schemas:
+    CreateOperationRequest:
+      type: object
+      required:
+        - node_id
+        - graph_id
+        - provider
+        - model
+        - prompt
+      properties:
+        node_id:
+          type: string
+          format: uuid
+          description: UUID of the target node for generated content
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        graph_id:
+          type: string
+          format: uuid
+          description: UUID of the parent graph
+          example: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+        provider:
+          type: string
+          enum:
+            - openai
+            - anthropic
+            - ollama
+          description: LLM provider/service
+        model:
+          type: string
+          description: |
+            Model identifier specific to provider.
+            Examples: gpt-4-turbo (OpenAI), claude-3-opus (Anthropic), mistral (Ollama)
+          minLength: 1
+          maxLength: 100
+          example: "gpt-4-turbo"
+        prompt:
+          type: string
+          description: User prompt for the LLM
+          minLength: 1
+          maxLength: 10000
+          example: "Explain quantum computing in simple terms"
+        system_prompt:
+          type: string
+          nullable: true
+          description: Optional system prompt to guide model behavior
+          maxLength: 5000
+          example: "You are a helpful AI assistant explaining complex topics clearly."
+      additionalProperties: false
+
+    CreateOperationResponse:
+      type: object
+      required:
+        - operation_id
+        - status
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+          description: Unique identifier for tracking the operation
+        status:
+          type: string
+          enum:
+            - queued
+            - processing
+            - streaming
+          description: Initial status of the operation
+        queue_position:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: Position in queue if operation is queued
+        estimated_wait_seconds:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: Estimated wait time in seconds if queued
+
+    OperationStatusResponse:
+      type: object
+      required:
+        - operation_id
+        - status
+        - progress
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+          description: Unique operation identifier
+        status:
+          type: string
+          enum:
+            - queued
+            - processing
+            - streaming
+            - completed
+            - failed
+            - cancelled
+          description: Current operation status
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Operation progress percentage
+        queue_position:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: Position in queue (only if status is 'queued')
+        estimated_wait_seconds:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: Estimated wait time in seconds (only if queued)
+        error_message:
+          type: string
+          nullable: true
+          description: Error description if status is 'failed'
+        node_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Target node UUID
+        graph_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Parent graph UUID
+        provider:
+          type: string
+          nullable: true
+          description: LLM provider
+        model:
+          type: string
+          nullable: true
+          description: Model name
+        queued_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When operation entered queue
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When operation started processing
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When operation completed
+        content_length:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: Number of characters generated so far
+        tokens_used:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: Tokens used by this operation
+
+    OperationsList:
+      type: object
+      required:
+        - operations
+        - total
+        - limit
+        - offset
+      properties:
+        operations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationSummary'
+          description: List of operations matching the filter
+        total:
+          type: integer
+          minimum: 0
+          description: Total number of operations matching the filter
+        limit:
+          type: integer
+          description: Pagination limit used
+        offset:
+          type: integer
+          description: Pagination offset used
+
+    OperationSummary:
+      type: object
+      required:
+        - operation_id
+        - status
+        - progress
+        - node_id
+        - graph_id
+        - provider
+        - model
+        - queued_at
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - queued
+            - processing
+            - streaming
+            - completed
+            - failed
+            - cancelled
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        node_id:
+          type: string
+          format: uuid
+        graph_id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+        model:
+          type: string
+        queued_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        content_length:
+          type: integer
+          minimum: 0
+
+    StreamingChunk:
+      oneOf:
+        - $ref: '#/components/schemas/StreamingChunkQueued'
+        - $ref: '#/components/schemas/StreamingChunkProgress'
+        - $ref: '#/components/schemas/StreamingChunkContent'
+        - $ref: '#/components/schemas/StreamingChunkComplete'
+        - $ref: '#/components/schemas/StreamingChunkError'
+      discriminator:
+        propertyName: type
+
+    StreamingChunkQueued:
+      type: object
+      required:
+        - type
+        - operation_id
+        - queue_position
+      properties:
+        type:
+          type: string
+          enum: ["queued"]
+          description: Event type identifier
+        operation_id:
+          type: string
+          format: uuid
+        queue_position:
+          type: integer
+          minimum: 1
+          description: Position in queue (1-based)
+        estimated_wait_seconds:
+          type: integer
+          minimum: 0
+          description: Estimated wait time in seconds
+
+    StreamingChunkProgress:
+      type: object
+      required:
+        - type
+        - operation_id
+        - progress
+      properties:
+        type:
+          type: string
+          enum: ["progress"]
+        operation_id:
+          type: string
+          format: uuid
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Progress percentage
+
+    StreamingChunkContent:
+      type: object
+      required:
+        - type
+        - operation_id
+        - content
+      properties:
+        type:
+          type: string
+          enum: ["content"]
+        operation_id:
+          type: string
+          format: uuid
+        content:
+          type: string
+          description: Streamed content chunk
+
+    StreamingChunkComplete:
+      type: object
+      required:
+        - type
+        - operation_id
+        - final_content
+      properties:
+        type:
+          type: string
+          enum: ["complete"]
+        operation_id:
+          type: string
+          format: uuid
+        final_content:
+          type: string
+          description: Complete generated content
+        node:
+          type: object
+          description: Created/updated node with generated content
+          properties:
+            id:
+              type: string
+              format: uuid
+            type:
+              type: string
+              description: Node type
+            content:
+              type: string
+              description: Node content
+            created_at:
+              type: string
+              format: date-time
+            parent_id:
+              type: string
+              format: uuid
+              nullable: true
+              description: Parent node UUID if created as child
+        tokens_used:
+          type: integer
+          minimum: 0
+        cost:
+          type: number
+          format: float
+          nullable: true
+          description: Estimated cost in USD
+
+    StreamingChunkError:
+      type: object
+      required:
+        - type
+        - operation_id
+        - error
+      properties:
+        type:
+          type: string
+          enum: ["error"]
+        operation_id:
+          type: string
+          format: uuid
+        error:
+          type: string
+          description: Error message
+        error_code:
+          type: string
+          nullable: true
+          description: Machine-readable error code
+        retry_after_seconds:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: Seconds to wait before retrying (if applicable)
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code/type
+          example: "VALIDATION_ERROR"
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          nullable: true
+          description: Additional error context
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+          description: When error occurred
+        request_id:
+          type: string
+          nullable: true
+          description: Request tracking ID for support
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT bearer token for authentication.
+        Format: Authorization: Bearer <token>
+        Future enhancement - not in scope for initial release.
+
+security: []  # No authentication for initial release
+
+x-events:
+  StreamEvents:
+    description: |
+      Server-Sent Events (SSE) emitted on the /llm-operations/{operation_id}/stream endpoint.
+
+      Each event is transmitted as text/event-stream with the format:
+      ```
+      event: <event_type>
+      data: <JSON_data>
+
+      ```
+
+      Supported events are defined in the StreamingChunk schema above.
+    events:
+      - name: queued
+        description: Operation entered queue
+      - name: progress
+        description: Progress update
+      - name: content
+        description: Streamed content chunk
+      - name: complete
+        description: Operation completed successfully
+      - name: error
+        description: Operation encountered an error
+
+x-status-codes:
+  201: Created operation (in queue or processing)
+  200: Success
+  400: Bad request (validation, invalid format, etc.)
+  404: Resource not found
+  408: Request timeout
+  409: Conflict (invalid state transition, locked resource)
+  429: Too many requests (queue full, rate limited)
+  500: Internal server error
+  503: Service unavailable
+
+x-examples:
+  concurrency-flow: |
+    ### Typical Concurrent Operation Flow
+
+    1. **Create Operation**: POST /api/llm-operations → 201 (operation_id, status=queued)
+    2. **Connect to Stream**: EventSource /api/llm-operations/{operation_id}/stream
+    3. **Receive Events**:
+       - queued event (if waiting in queue)
+       - progress events (as processing begins)
+       - content events (streamed chunks)
+       - complete event (operation finished)
+    4. **Close Stream**: Auto-closes 5 seconds after completion
+    5. **Verify**: GET /api/llm-operations/{operation_id} for final status
+
+  error-recovery: |
+    ### Error Handling and Recovery
+
+    - **429 (Queue Full)**: Implement exponential backoff retry after estimated_wait_seconds
+    - **Stream Disconnect**: Reconnect EventSource automatically; maintain operation_id
+    - **Timeout**: Check status via GET endpoint if stream idle for 60+ seconds
+    - **Operation Failed**: Check error_message in status response for details

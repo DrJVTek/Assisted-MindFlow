@@ -18,6 +18,35 @@ export type NodeType =
 
 export type NodeAuthor = 'human' | 'llm' | 'tool';
 
+/**
+ * State of a node's LLM operation.
+ *
+ * Represents the lifecycle of an LLM operation on a node:
+ * - idle: No LLM operation in progress
+ * - queued: LLM operation queued, waiting for available slot
+ * - processing: LLM request sent, waiting for first token
+ * - streaming: LLM tokens arriving, content being accumulated
+ * - completed: LLM operation finished successfully
+ * - failed: LLM operation failed (timeout, error, rate limit)
+ * - cancelled: LLM operation cancelled by user
+ *
+ * State Transitions:
+ *   idle → queued → processing → streaming → completed
+ *                                            ↓
+ *                                          failed
+ *                                            ↓
+ *                                        cancelled (from any state)
+ */
+export enum NodeState {
+  IDLE = 'idle',
+  QUEUED = 'queued',
+  PROCESSING = 'processing',
+  STREAMING = 'streaming',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  CANCELLED = 'cancelled'
+}
+
 export type NodeStatus = 'draft' | 'valid' | 'invalid' | 'final' | 'experimental';
 
 export interface NodeMetadata {

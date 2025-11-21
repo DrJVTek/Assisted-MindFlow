@@ -23,7 +23,7 @@
  */
 
 import React, { useMemo } from 'react';
-import { UUID } from '../types/uuid';
+import type { UUID } from '../types/uuid';
 import { useLLMOperationsStore } from '../stores/llmOperationsStore';
 import { useStreamingContentStore } from '../stores/streamingContentStore';
 import { StreamingIndicator } from './StreamingIndicator';

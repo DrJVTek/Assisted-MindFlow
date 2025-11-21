@@ -21,7 +21,7 @@
 
 import React, { useState } from 'react';
 import { X, Bot, Sparkles } from 'lucide-react';
-import { UUID } from '../types/uuid';
+import type { UUID } from '../types/uuid';
 import { useLLMOperationsStore } from '../stores/llmOperationsStore';
 import { useStreamingContent } from '../hooks/useStreamingContent';
 

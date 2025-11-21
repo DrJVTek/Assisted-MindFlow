@@ -1,0 +1,752 @@
+openapi: 3.0.3
+
+info:
+  title: Node Version History API
+  description: |
+    REST API for node version history management with temporal timeline UI support.
+    Enables tracking every node content change, parent impact tracking through child markers,
+    and spatio-temporal reasoning through version navigation.
+  version: 1.0.0
+  contact:
+    name: MindFlow Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development server
+  - url: http://localhost:8000/api/v1
+    description: Versioned API endpoint (recommended)
+
+tags:
+  - name: versions
+    description: Node version lifecycle management
+  - name: diff
+    description: Version comparison and diff visualization
+  - name: timeline
+    description: Temporal timeline views (per-node and global)
+  - name: archive
+    description: Version archiving operations
+
+paths:
+  /nodes/{node_id}/versions:
+    post:
+      summary: Create new node version
+      description: |
+        Creates a new immutable version snapshot of node content. Versions are automatically
+        throttled (3s inactivity or 30% content change threshold) unless bypass_throttle is true.
+        LLM operations and cascades always create versions immediately.
+      operationId: createNodeVersion
+      tags:
+        - versions
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          description: UUID of the node
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVersionRequest'
+            examples:
+              manual_edit:
+                summary: Manual edit version
+                value:
+                  content: "Updated content after user typing"
+                  trigger_reason: "manual_edit"
+              llm_regen:
+                summary: LLM generation version
+                value:
+                  content: "AI-generated response content"
+                  trigger_reason: "user_regen"
+                  llm_metadata:
+                    provider: "openai"
+                    model: "gpt-4-turbo"
+                    tokens: 150
+                    generation_time_ms: 2500
+                    prompt_used: "Explain quantum computing"
+      responses:
+        '201':
+          description: Version created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeVersion'
+        '400':
+          description: Invalid request (throttled or validation error)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "THROTTLED"
+                message: "Version creation throttled - too soon since last version (< 3s)"
+        '404':
+          description: Node not found
+
+    get:
+      summary: List node versions
+      description: |
+        Retrieve all versions for a node. By default returns only non-archived versions
+        (last 30 days). Use include_archived=true to load older versions from archive.
+      operationId: listNodeVersions
+      tags:
+        - versions
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: include_archived
+          in: query
+          required: false
+          description: Include archived versions (>30 days old)
+          schema:
+            type: boolean
+            default: false
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Versions retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionListResponse'
+        '404':
+          description: Node not found
+
+  /nodes/{node_id}/versions/{version_number}:
+    get:
+      summary: Get specific version
+      description: Retrieve a single version by its version number
+      operationId: getNodeVersion
+      tags:
+        - versions
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: version_number
+          in: path
+          required: true
+          description: Sequential version number (1, 2, 3, ...)
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Version retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeVersion'
+        '404':
+          description: Version not found
+
+  /nodes/{node_id}/versions/{version_number}/restore:
+    post:
+      summary: Restore previous version
+      description: |
+        Restore node content to a previous version. This is non-destructive: creates a new
+        version with trigger_reason='rollback' and parent_version_id pointing to restored version.
+      operationId: restoreNodeVersion
+      tags:
+        - versions
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: version_number
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '201':
+          description: Version restored (new version created)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeVersion'
+        '404':
+          description: Version not found
+
+  /nodes/{node_id}/versions/diff:
+    post:
+      summary: Compute version diff
+      description: |
+        Compute word-level diff between two versions using Myers algorithm.
+        Diff is computed on-demand (not stored). Large diffs (>5000 words) may take 1-2 seconds.
+      operationId: computeVersionDiff
+      tags:
+        - diff
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiffRequest'
+            example:
+              version_a_number: 2
+              version_b_number: 5
+      responses:
+        '200':
+          description: Diff computed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiffResponse'
+        '400':
+          description: Invalid version numbers
+        '404':
+          description: Version not found
+
+  /nodes/{node_id}/timeline:
+    get:
+      summary: Get per-node timeline
+      description: |
+        Retrieve timeline data for a single node including all versions and child change markers.
+        Used for per-node history UI with slider component.
+      operationId: getNodeTimeline
+      tags:
+        - timeline
+      parameters:
+        - name: node_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: include_child_markers
+          in: query
+          required: false
+          description: Include child change markers in timeline
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: Timeline retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeTimelineResponse'
+        '404':
+          description: Node not found
+
+  /graphs/{graph_id}/timeline:
+    get:
+      summary: Get global timeline
+      description: |
+        Retrieve global timeline for entire graph showing all version events and child markers
+        across all nodes. Events are aggregated/clustered for performance when total exceeds 1000.
+      operationId: getGraphTimeline
+      tags:
+        - timeline
+      parameters:
+        - name: graph_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: start_date
+          in: query
+          required: false
+          description: Filter events after this date
+          schema:
+            type: string
+            format: date-time
+        - name: end_date
+          in: query
+          required: false
+          description: Filter events before this date
+          schema:
+            type: string
+            format: date-time
+        - name: event_types
+          in: query
+          required: false
+          description: Filter by event types (comma-separated)
+          schema:
+            type: string
+            example: "version_created,cascade_triggered"
+        - name: node_ids
+          in: query
+          required: false
+          description: Filter by specific nodes (comma-separated UUIDs)
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 1000
+      responses:
+        '200':
+          description: Timeline retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TimelineEventsResponse'
+        '404':
+          description: Graph not found
+
+components:
+  schemas:
+    CreateVersionRequest:
+      type: object
+      required:
+        - content
+        - trigger_reason
+      properties:
+        content:
+          type: string
+          maxLength: 10000
+          description: Full node content for this version
+        trigger_reason:
+          type: string
+          enum:
+            - manual_edit
+            - user_regen
+            - parent_cascade
+            - rollback
+            - manual_save
+        llm_metadata:
+          $ref: '#/components/schemas/LLMMetadata'
+        cascade_metadata:
+          $ref: '#/components/schemas/CascadeMetadata'
+        bypass_throttle:
+          type: boolean
+          default: false
+          description: Force immediate version creation (skip throttling)
+
+    NodeVersion:
+      type: object
+      required:
+        - version_id
+        - node_id
+        - version_number
+        - content
+        - created_at
+        - trigger_reason
+        - author
+      properties:
+        version_id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+          format: uuid
+        version_number:
+          type: integer
+          minimum: 1
+        content:
+          type: string
+        word_count:
+          type: integer
+          minimum: 0
+        char_count:
+          type: integer
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        trigger_reason:
+          type: string
+          enum:
+            - manual_edit
+            - user_regen
+            - parent_cascade
+            - rollback
+            - manual_save
+        author:
+          type: string
+          enum:
+            - human
+            - LLM
+        llm_metadata:
+          $ref: '#/components/schemas/LLMMetadata'
+        cascade_metadata:
+          $ref: '#/components/schemas/CascadeMetadata'
+        parent_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: For rollback chains
+
+    LLMMetadata:
+      type: object
+      required:
+        - provider
+        - model
+        - tokens
+        - generation_time_ms
+        - prompt_used
+      properties:
+        provider:
+          type: string
+          example: "openai"
+        model:
+          type: string
+          example: "gpt-4-turbo"
+        tokens:
+          type: integer
+          minimum: 0
+        generation_time_ms:
+          type: integer
+          minimum: 0
+        prompt_used:
+          type: string
+          maxLength: 500
+          description: User prompt (truncated to 500 chars)
+
+    CascadeMetadata:
+      type: object
+      required:
+        - triggering_child_versions
+        - cascade_depth
+        - cascade_timestamp
+      properties:
+        triggering_child_versions:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: List of child version IDs that triggered regeneration
+        cascade_depth:
+          type: integer
+          minimum: 1
+          description: 1 = direct child, 2 = grandchild, etc.
+        cascade_timestamp:
+          type: string
+          format: date-time
+
+    VersionListResponse:
+      type: object
+      required:
+        - versions
+        - total_count
+        - has_archived
+      properties:
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeVersion'
+        total_count:
+          type: integer
+          minimum: 0
+        has_archived:
+          type: boolean
+          description: True if archived versions exist (>30 days old)
+        oldest_version_date:
+          type: string
+          format: date-time
+          nullable: true
+        newest_version_date:
+          type: string
+          format: date-time
+          nullable: true
+
+    DiffRequest:
+      type: object
+      required:
+        - version_a_number
+        - version_b_number
+      properties:
+        version_a_number:
+          type: integer
+          minimum: 1
+          description: Older version number (left side of diff)
+        version_b_number:
+          type: integer
+          minimum: 1
+          description: Newer version number (right side of diff)
+
+    DiffResponse:
+      type: object
+      required:
+        - diff
+        - version_a
+        - version_b
+      properties:
+        diff:
+          $ref: '#/components/schemas/VersionDiff'
+        version_a:
+          $ref: '#/components/schemas/NodeVersion'
+        version_b:
+          $ref: '#/components/schemas/NodeVersion'
+
+    VersionDiff:
+      type: object
+      required:
+        - old_version_id
+        - new_version_id
+        - changes
+        - word_count_delta
+        - computation_time_ms
+      properties:
+        old_version_id:
+          type: string
+          format: uuid
+        new_version_id:
+          type: string
+          format: uuid
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiffChange'
+        word_count_delta:
+          type: integer
+          description: Net word count change (+150, -30, etc.)
+        char_count_delta:
+          type: integer
+        additions_count:
+          type: integer
+        deletions_count:
+          type: integer
+        modifications_count:
+          type: integer
+        computed_at:
+          type: string
+          format: date-time
+        computation_time_ms:
+          type: integer
+
+    DiffChange:
+      type: object
+      required:
+        - type
+        - start_pos
+        - end_pos
+      properties:
+        type:
+          type: string
+          enum:
+            - addition
+            - deletion
+            - modification
+            - unchanged
+            - collapsed_unchanged
+        text:
+          type: string
+          nullable: true
+          description: For additions/deletions
+        old_text:
+          type: string
+          nullable: true
+          description: For modifications (before)
+        new_text:
+          type: string
+          nullable: true
+          description: For modifications (after)
+        start_pos:
+          type: integer
+          minimum: 0
+        end_pos:
+          type: integer
+          minimum: 0
+
+    NodeTimelineResponse:
+      type: object
+      required:
+        - node_id
+        - versions
+        - child_markers
+      properties:
+        node_id:
+          type: string
+          format: uuid
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeVersion'
+        child_markers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChildChangeMarker'
+        total_version_count:
+          type: integer
+        has_archived:
+          type: boolean
+
+    ChildChangeMarker:
+      type: object
+      required:
+        - marker_id
+        - parent_node_id
+        - child_node_id
+        - child_version_id
+        - timestamp
+        - marker_type
+        - cascade_depth
+      properties:
+        marker_id:
+          type: string
+          format: uuid
+        parent_node_id:
+          type: string
+          format: uuid
+        child_node_id:
+          type: string
+          format: uuid
+        child_version_id:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        marker_type:
+          type: string
+          enum:
+            - direct_child_change
+            - transitive_child_change
+        cascade_depth:
+          type: integer
+          minimum: 1
+        child_node_title:
+          type: string
+          maxLength: 100
+        child_content_preview:
+          type: string
+          maxLength: 200
+
+    TimelineEventsResponse:
+      type: object
+      required:
+        - events
+        - total_count
+        - aggregated
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimelineEvent'
+        total_count:
+          type: integer
+        aggregated:
+          type: boolean
+          description: True if events were clustered for performance
+        cluster_window_ms:
+          type: integer
+          nullable: true
+          description: Aggregation window in milliseconds if clustered
+
+    TimelineEvent:
+      type: object
+      required:
+        - event_id
+        - event_type
+        - node_id
+        - timestamp
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          enum:
+            - version_created
+            - child_changed
+            - cascade_triggered
+        node_id:
+          type: string
+          format: uuid
+        node_title:
+          type: string
+          maxLength: 100
+        timestamp:
+          type: string
+          format: date-time
+        author:
+          type: string
+          enum:
+            - human
+            - LLM
+        trigger_reason:
+          type: string
+          enum:
+            - manual_edit
+            - user_regen
+            - parent_cascade
+            - rollback
+            - manual_save
+          nullable: true
+        content_preview:
+          type: string
+          maxLength: 100
+        metadata:
+          type: object
+          additionalProperties: true
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code/type
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          nullable: true
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+
+security: []  # No authentication for initial release
+
+x-throttling-rules:
+  inactivity_threshold_seconds: 3
+  content_change_threshold_percent: 30
+  max_versions_per_node: 100
+  archive_threshold_days: 30
+
+x-performance-targets:
+  load_100_versions_ms: 500
+  compute_diff_1000_words_ms: 100
+  compute_diff_10000_words_ms: 1000
+  global_timeline_50k_events_ms: 2000

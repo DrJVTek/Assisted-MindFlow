@@ -1,0 +1,738 @@
+# Progress Event Specification
+# WebSocket/SSE message formats for LLM operation progress updates
+# Feature: 008-llm-progress-indicators
+# Date: 2025-11-21
+
+description: |
+  This specification defines the event formats exchanged between backend and frontend
+  for real-time progress tracking of LLM operations. Events are transmitted via
+  WebSocket (for full-duplex) or Server-Sent Events (for unidirectional backend→frontend).
+
+---
+
+## Event Message Format
+
+All progress events share a common structure:
+
+```yaml
+EventMessage:
+  type: object
+  required:
+    - event_id
+    - timestamp
+    - type
+    - operation_id
+  properties:
+    event_id:
+      type: string
+      format: uuid
+      description: Unique identifier for this event (for deduplication)
+    timestamp:
+      type: string
+      format: date-time
+      description: ISO 8601 timestamp when event occurred on backend
+    type:
+      type: string
+      enum:
+        - operation_initiated
+        - operation_queued
+        - first_token_received
+        - token_received
+        - final_token_received
+        - operation_failed
+        - operation_cancelled
+        - operation_paused
+        - operation_resumed
+        - connection_lost
+        - connection_restored
+      description: Event type identifier
+    operation_id:
+      type: string
+      format: uuid
+      description: UUID of the operation this event belongs to
+    node_id:
+      type: string
+      format: uuid
+      description: UUID of the node being operated on
+```
+
+---
+
+## Event Types
+
+### 1. operation_initiated
+
+Fired when user initiates an LLM operation (clicks "Ask LLM" button).
+
+```yaml
+OperationInitiated:
+  type: object
+  description: User initiated a new LLM operation
+  properties:
+    type:
+      const: operation_initiated
+    operation_id:
+      type: string
+      format: uuid
+      description: Unique ID for this operation instance
+    node_id:
+      type: string
+      format: uuid
+      description: Which node the operation is for
+    node_title:
+      type: string
+      maxLength: 100
+      description: Short title of the node (for logging/UI)
+    operation_type:
+      type: string
+      enum: [generate, refine, analyze, translate, summarize]
+      description: Type of LLM operation
+    model_id:
+      type: string
+      description: Which LLM model is being used
+    timestamp:
+      type: string
+      format: date-time
+    request_parameters:
+      type: object
+      description: |
+        Optional: parameters passed to LLM (prompt, temperature, max_tokens, etc.)
+        Should be minimal to avoid bloating events
+
+  example:
+    event_id: "a1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o6"
+    timestamp: "2025-11-21T10:30:45.123Z"
+    type: "operation_initiated"
+    operation_id: "op-uuid-here"
+    node_id: "node-uuid-here"
+    node_title: "What is machine learning?"
+    operation_type: "generate"
+    model_id: "gpt-4-turbo"
+```
+
+---
+
+### 2. operation_queued
+
+Fired when operation is queued due to concurrency limit (not enough available slots).
+
+```yaml
+OperationQueued:
+  type: object
+  description: Operation added to queue due to concurrency limit
+  properties:
+    type:
+      const: operation_queued
+    operation_id:
+      type: string
+      format: uuid
+    node_id:
+      type: string
+      format: uuid
+    queue_position:
+      type: integer
+      minimum: 1
+      description: Position in queue (1-indexed, 1 = first in queue)
+    queue_size:
+      type: integer
+      minimum: 1
+      description: Total number of queued operations
+    estimated_wait_seconds:
+      type: number
+      minimum: 0
+      description: |
+        Rough estimate of wait time based on average operation duration.
+        Not reliable, best-effort estimate only.
+    timestamp:
+      type: string
+      format: date-time
+
+  example:
+    event_id: "b2c3d4e5-f6g7-48h9-i0j1-k2l3m4n5o6p7"
+    timestamp: "2025-11-21T10:30:45.200Z"
+    type: "operation_queued"
+    operation_id: "op-uuid-here"
+    node_id: "node-uuid-here"
+    queue_position: 2
+    queue_size: 5
+    estimated_wait_seconds: 8.5
+```
+
+---
+
+### 3. first_token_received
+
+Fired when first token arrives from LLM (signals transition from processing→streaming).
+
+```yaml
+FirstTokenReceived:
+  type: object
+  description: First token received from LLM, streaming begins
+  properties:
+    type:
+      const: first_token_received
+    operation_id:
+      type: string
+      format: uuid
+    node_id:
+      type: string
+      format: uuid
+    token:
+      type: string
+      description: The actual first token content
+    timestamp:
+      type: string
+      format: date-time
+
+  example:
+    event_id: "c3d4e5f6-g7h8-49i0-j1k2-l3m4n5o6p7q8"
+    timestamp: "2025-11-21T10:30:50.100Z"
+    type: "first_token_received"
+    operation_id: "op-uuid-here"
+    node_id: "node-uuid-here"
+    token: "Machine"
+```
+
+---
+
+### 4. token_received
+
+Fired for each batch of tokens received (batched every 50-100ms to prevent flooding).
+
+**Frequency**: Every 50-100ms (not every single token)
+
+```yaml
+TokenReceived:
+  type: object
+  description: Batch of tokens received during streaming
+  properties:
+    type:
+      const: token_received
+    operation_id:
+      type: string
+      format: uuid
+    node_id:
+      type: string
+      format: uuid
+    tokens:
+      type: array
+      items:
+        type: string
+      description: Array of tokens in this batch (usually 1-20 tokens)
+    batch_content:
+      type: string
+      description: |
+        Concatenated string of all tokens in batch.
+        Frontend can either use individual tokens or batch_content.
+    token_count:
+      type: integer
+      minimum: 1
+      description: Number of tokens received so far (cumulative)
+    word_count:
+      type: integer
+      minimum: 0
+      description: |
+        Approximate word count of response so far.
+        Calculated as roughly token_count / 1.3 (varies by model/language)
+    elapsed_seconds:
+      type: number
+      minimum: 0
+      description: Seconds elapsed since operation started
+    tokens_per_second:
+      type: number
+      minimum: 0
+      description: |
+        Current throughput (tokens/sec).
+        Useful for showing "generating at X tokens/sec" feedback.
+    timestamp:
+      type: string
+      format: date-time
+
+  example:
+    event_id: "d4e5f6g7-h8i9-50j1-k2l3-m4n5o6p7q8r9"
+    timestamp: "2025-11-21T10:30:50.150Z"
+    type: "token_received"
+    operation_id: "op-uuid-here"
+    node_id: "node-uuid-here"
+    tokens: ["learning", " is", " a"]
+    batch_content: "learning is a"
+    token_count: 7
+    word_count: 5
+    elapsed_seconds: 0.25
+    tokens_per_second: 28.0
+```
+
+---
+
+### 5. final_token_received
+
+Fired when LLM finishes streaming (final token received, no more tokens coming).
+
+```yaml
+FinalTokenReceived:
+  type: object
+  description: Final token received, streaming complete
+  properties:
+    type:
+      const: final_token_received
+    operation_id:
+      type: string
+      format: uuid
+    node_id:
+      type: string
+      format: uuid
+    total_tokens:
+      type: integer
+      minimum: 1
+      description: Total tokens generated
+    total_words:
+      type: integer
+      minimum: 0
+      description: Approximate total word count
+    final_token:
+      type: string
+      description: The last token (if not already sent)
+    elapsed_seconds:
+      type: number
+      minimum: 0
+      description: Total time from operation_initiated to final_token_received
+    average_tokens_per_second:
+      type: number
+      minimum: 0
+      description: Average throughput (total_tokens / elapsed_seconds)
+    timestamp:
+      type: string
+      format: date-time
+
+  example:
+    event_id: "e5f6g7h8-i9j0-51k2-l3m4-n5o6p7q8r9s0"
+    timestamp: "2025-11-21T10:30:55.500Z"
+    type: "final_token_received"
+    operation_id: "op-uuid-here"
+    node_id: "node-uuid-here"
+    total_tokens: 142
+    total_words: 109
+    final_token: "."
+    elapsed_seconds: 5.4
+    average_tokens_per_second: 26.3
+```
+
+---
+
+### 6. operation_failed
+
+Fired when operation fails (error from LLM provider, timeout, network error, etc.).
+
+```yaml
+OperationFailed:
+  type: object
+  description: Operation failed with error
+  properties:
+    type:
+      const: operation_failed
+    operation_id:
+      type: string
+      format: uuid
+    node_id:
+      type: string
+      format: uuid
+    error_code:
+      type: string
+      enum:
+        - timeout
+        - rate_limit
+        - model_unavailable
+        - invalid_request
+        - network_error
+        - unknown_error
+      description: Categorized error type
+    error_message:
+      type: string
+      maxLength: 500
+      description: |
+        User-facing error message (e.g., "Request timed out after 30 seconds").
+        Should be human-readable and actionable.
+    error_details:
+      type: string
+      description: |
+        Optional technical details (for logging/debugging).
+        Should NOT be shown to end users, only for logs.
+    is_retryable:
+      type: boolean
+      description: |
+        Whether user can retry this operation.
+        True for: timeout, rate_limit, network_error
+        False for: invalid_request, model_unavailable
+    timestamp:
+      type: string
+      format: date-time
+
+  example:
+    event_id: "f6g7h8i9-j0k1-52l3-m4n5-o6p7q8r9s0t1"
+    timestamp: "2025-11-21T10:30:45.600Z"
+    type: "operation_failed"
+    operation_id: "op-uuid-here"
+    node_id: "node-uuid-here"
+    error_code: "timeout"
+    error_message: "LLM request timed out after 30 seconds. Please try again."
+    error_details: "OpenAI API timeout: no response within 30000ms"
+    is_retryable: true
+```
+
+---
+
+### 7. operation_cancelled
+
+Fired when user cancels an ongoing operation.
+
+```yaml
+OperationCancelled:
+  type: object
+  description: User cancelled operation
+  properties:
+    type:
+      const: operation_cancelled
+    operation_id:
+      type: string
+      format: uuid
+    node_id:
+      type: string
+      format: uuid
+    reason:
+      type: string
+      enum: [user_cancelled, user_dismissed, parent_node_deleted]
+      description: Why the operation was cancelled
+    partial_content:
+      type: string
+      description: |
+        Optional: any content generated before cancellation.
+        Frontend can decide whether to keep or discard.
+    timestamp:
+      type: string
+      format: date-time
+
+  example:
+    event_id: "g7h8i9j0-k1l2-53m4-n5o6-p7q8r9s0t1u2"
+    timestamp: "2025-11-21T10:30:47.000Z"
+    type: "operation_cancelled"
+    operation_id: "op-uuid-here"
+    node_id: "node-uuid-here"
+    reason: "user_cancelled"
+    partial_content: "Machine learning is a"
+```
+
+---
+
+### 8. operation_paused
+
+Fired when operation is interrupted (network disconnect, backend issue, etc.)
+
+```yaml
+OperationPaused:
+  type: object
+  description: Operation paused due to external interruption
+  properties:
+    type:
+      const: operation_paused
+    operation_id:
+      type: string
+      format: uuid
+    node_id:
+      type: string
+      format: uuid
+    reason:
+      type: string
+      enum:
+        - network_disconnect
+        - backend_restarted
+        - connection_lost
+        - manual_pause
+      description: Why operation was paused
+    current_content:
+      type: string
+      description: Content generated up to point of pause
+    can_resume:
+      type: boolean
+      description: Whether this operation can be resumed (usually true)
+    timestamp:
+      type: string
+      format: date-time
+
+  example:
+    event_id: "h8i9j0k1-l2m3-54n5-o6p7-q8r9s0t1u2v3"
+    timestamp: "2025-11-21T10:30:48.000Z"
+    type: "operation_paused"
+    operation_id: "op-uuid-here"
+    node_id: "node-uuid-here"
+    reason: "network_disconnect"
+    current_content: "Machine learning is a subset"
+    can_resume: true
+```
+
+---
+
+### 9. operation_resumed
+
+Fired when paused operation resumes (connection restored).
+
+```yaml
+OperationResumed:
+  type: object
+  description: Paused operation resumed
+  properties:
+    type:
+      const: operation_resumed
+    operation_id:
+      type: string
+      format: uuid
+    node_id:
+      type: string
+      format: uuid
+    resume_reason:
+      type: string
+      description: Why operation is resuming (e.g., "Connection restored")
+    timestamp:
+      type: string
+      format: date-time
+
+  example:
+    event_id: "i9j0k1l2-m3n4-55o6-p7q8-r9s0t1u2v3w4"
+    timestamp: "2025-11-21T10:30:50.500Z"
+    type: "operation_resumed"
+    operation_id: "op-uuid-here"
+    node_id: "node-uuid-here"
+    resume_reason: "Connection restored"
+```
+
+---
+
+### 10. connection_lost
+
+Broadcast to all clients when backend loses external connection (e.g., LLM API down).
+
+```yaml
+ConnectionLost:
+  type: object
+  description: Backend lost external connection affecting all operations
+  properties:
+    type:
+      const: connection_lost
+    affected_service:
+      type: string
+      enum: [llm_provider, database, external_api]
+      description: Which external service is unavailable
+    affected_operation_ids:
+      type: array
+      items:
+        type: string
+        format: uuid
+      description: Which operations are affected by this connection loss
+    timestamp:
+      type: string
+      format: date-time
+
+  example:
+    event_id: "j0k1l2m3-n4o5-56p7-q8r9-s0t1u2v3w4x5"
+    timestamp: "2025-11-21T10:30:51.000Z"
+    type: "connection_lost"
+    affected_service: "llm_provider"
+    affected_operation_ids:
+      - "op-uuid-1"
+      - "op-uuid-2"
+      - "op-uuid-3"
+```
+
+---
+
+### 11. connection_restored
+
+Broadcast when backend reconnects to external service.
+
+```yaml
+ConnectionRestored:
+  type: object
+  description: Backend reconnected to external service
+  properties:
+    type:
+      const: connection_restored
+    service:
+      type: string
+      enum: [llm_provider, database, external_api]
+      description: Which external service is now available
+    timestamp:
+      type: string
+      format: date-time
+
+  example:
+    event_id: "k1l2m3n4-o5p6-57q8-r9s0-t1u2v3w4x5y6"
+    timestamp: "2025-11-21T10:30:55.000Z"
+    type: "connection_restored"
+    service: "llm_provider"
+```
+
+---
+
+## Event Delivery Guarantees
+
+### Ordering
+
+Events for a single operation_id are guaranteed to be delivered in order (within a single WebSocket connection).
+
+### Deduplication
+
+- Use `event_id` field for deduplication
+- If same event_id received twice, ignore second occurrence
+- Frontend should implement a 5-minute dedup window
+
+### Batching
+
+Token events are batched to prevent flooding:
+
+```
+- Maximum frequency: 20 events per second
+- Minimum interval: 50ms between token_received events
+- If tokens arrive faster than 50ms, batch them together
+- Frontend should flush all pending batch data when final_token_received arrives
+```
+
+### Heartbeat (Optional)
+
+For long-running operations without token activity, backend can send heartbeat:
+
+```yaml
+Heartbeat:
+  type: object
+  properties:
+    type:
+      const: heartbeat
+    operation_id:
+      type: string
+      format: uuid
+    timestamp:
+      type: string
+      format: date-time
+  description: |
+    Optional keepalive message if no events in 30 seconds.
+    Frontend can use to verify connection is still alive.
+```
+
+---
+
+## Transport Options
+
+### WebSocket (Preferred)
+
+- Endpoint: `wss://api.example.com/ws/progress`
+- Supports bidirectional communication
+- Allows client→server commands (cancel, pause, retry)
+- Lower latency
+
+### Server-Sent Events (Fallback)
+
+- Endpoint: `https://api.example.com/sse/progress`
+- One-way connection (server→client only)
+- Text-based, easier to debug
+- Automatic reconnection
+- Client→server commands via separate REST endpoints
+
+---
+
+## Error Handling
+
+### Connection Errors
+
+If WebSocket/SSE connection is lost:
+
+1. Frontend attempts to reconnect (exponential backoff: 1s, 2s, 4s, 8s, max 30s)
+2. After reconnection, request state of all active operations via REST API
+3. Reconcile frontend state with backend state
+4. Resume listening for new events
+
+### Event Validation
+
+Invalid events should be logged and ignored:
+
+```typescript
+if (!isValidProgressEvent(event)) {
+  console.error('Invalid event:', event);
+  // Continue listening, don't crash
+}
+```
+
+---
+
+## Event Stream Lifecycle
+
+```
+[User clicks "Ask LLM"]
+        ↓
+operation_initiated
+        ↓
+(optional) operation_queued
+        ↓
+first_token_received
+        ↓
+token_received (repeated, batched every 50ms)
+        ↓
+final_token_received
+        ↓
+[Operation complete]
+
+Alternative paths:
+- operation_initiated → operation_failed
+- operation_initiated → operation_cancelled
+- token_received → operation_paused → operation_resumed → token_received → final_token_received
+```
+
+---
+
+## API Endpoint Specification
+
+Complement WebSocket events with REST endpoints for:
+
+### GET /api/operations/{operation_id}
+
+Get current state of an operation.
+
+**Response**:
+```json
+{
+  "operation_id": "uuid",
+  "node_id": "uuid",
+  "status": "processing|streaming|completed|failed|paused|cancelled",
+  "progress_value": 42,
+  "progress_type": "word_count|percentage|elapsed_time",
+  "error_message": null,
+  "current_content": "...",
+  "started_at": "2025-11-21T10:30:45.123Z",
+  "updated_at": "2025-11-21T10:30:50.500Z"
+}
+```
+
+### GET /api/operations?status=active
+
+List active operations (for dashboard recovery).
+
+### POST /api/operations/{operation_id}/cancel
+
+Cancel an operation.
+
+### POST /api/operations/{operation_id}/retry
+
+Retry a failed operation.
+
+---
+
+## Summary
+
+This event specification provides:
+
+1. **Clear Event Types**: 11 distinct event types covering all operation states
+2. **Batching**: Token events batched every 50-100ms for performance
+3. **Real-time Feedback**: <200ms latency from backend to frontend
+4. **Error Recovery**: Robust error handling and reconnection logic
+5. **Deduplication**: Event ID prevents duplicate processing
+6. **Flexibility**: Works with WebSocket or SSE transport
+7. **Completeness**: All operation information needed for progress UI
+
+Ready for implementation in both backend and frontend.

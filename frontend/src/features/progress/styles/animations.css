@@ -1,0 +1,271 @@
+/**
+ * GPU-Accelerated Animations for Progress Indicators
+ *
+ * Uses transform and opacity for 60fps performance
+ * All animations are GPU-accelerated via CSS transforms
+ */
+
+/* ==============================================
+   KEYFRAME DEFINITIONS
+   ============================================== */
+
+/**
+ * Spin animation - for processing indicators
+ * 60fps rotation using transform
+ */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/**
+ * Pulse animation - for queued/waiting states
+ * Opacity fade in/out
+ */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/**
+ * Flow animation - for streaming progress
+ * Gradient flow effect
+ */
+@keyframes flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/**
+ * Bounce-complete animation - for completion state
+ * Subtle scale pulse on success
+ */
+@keyframes bounce-complete {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+/**
+ * Fade-in animation - for indicator appearance
+ * Smooth opacity transition
+ */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/**
+ * Slide-in animation - for dashboard/panels
+ * Translate with opacity
+ */
+@keyframes slide-in {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/**
+ * Shimmer animation - for loading states
+ * Background gradient shift
+ */
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+/* ==============================================
+   ANIMATION UTILITY CLASSES
+   ============================================== */
+
+/**
+ * Processing state - rotating spinner
+ */
+.animate-spin {
+  animation: spin 1s linear infinite;
+  will-change: transform;
+}
+
+/**
+ * Pulsing state - for queued operations
+ */
+.animate-pulse {
+  animation: pulse 2s ease-in-out infinite;
+  will-change: opacity;
+}
+
+/**
+ * Flowing state - for streaming progress
+ */
+.animate-flow {
+  background-size: 200% 200%;
+  animation: flow 3s ease infinite;
+  will-change: background-position;
+}
+
+/**
+ * Completion bounce - brief scale pulse
+ */
+.animate-bounce-complete {
+  animation: bounce-complete 0.5s ease-out;
+  will-change: transform;
+}
+
+/**
+ * Fade in appearance
+ */
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+  will-change: opacity;
+}
+
+/**
+ * Slide in from bottom
+ */
+.animate-slide-in {
+  animation: slide-in 0.4s ease-out;
+  will-change: transform, opacity;
+}
+
+/**
+ * Shimmer loading effect
+ */
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+  will-change: background-position;
+}
+
+/* ==============================================
+   EASING CURVES
+   ============================================== */
+
+:root {
+  /* Smooth easing for transitions */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* Animation durations */
+  --duration-fast: 200ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+}
+
+/* ==============================================
+   GPU ACCELERATION HINTS
+   ============================================== */
+
+/**
+ * Force GPU acceleration for animated elements
+ * Use sparingly - only on animated elements
+ */
+.gpu-accelerate {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/**
+ * Disable GPU acceleration (for reduced-motion)
+ */
+.no-gpu-accelerate {
+  transform: none;
+  will-change: auto;
+}
+
+/* ==============================================
+   TRANSITION UTILITIES
+   ============================================== */
+
+/**
+ * Fast transition - 200ms
+ */
+.transition-fast {
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+/**
+ * Normal transition - 300ms
+ */
+.transition-normal {
+  transition: all var(--duration-normal) var(--ease-out);
+}
+
+/**
+ * Slow transition - 500ms
+ */
+.transition-slow {
+  transition: all var(--duration-slow) var(--ease-in-out);
+}
+
+/**
+ * Transform-only transition (GPU-accelerated)
+ */
+.transition-transform {
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+/**
+ * Opacity-only transition (GPU-accelerated)
+ */
+.transition-opacity {
+  transition: opacity var(--duration-normal) var(--ease-out);
+}
+
+/* ==============================================
+   PERFORMANCE OPTIMIZATIONS
+   ============================================== */
+
+/**
+ * Paused animation state (off-screen optimization)
+ */
+.animation-paused {
+  animation-play-state: paused !important;
+}
+
+/**
+ * Disabled animations (accessibility)
+ */
+.animation-disabled {
+  animation: none !important;
+  transition: none !important;
+}

@@ -1,0 +1,813 @@
+openapi: 3.0.3
+info:
+  title: Model Context Protocol (MCP) Specification
+  description: |
+    JSON-RPC 2.0 based protocol for Model Context Protocol servers.
+
+    This specification documents the MCP protocol messages that MindFlow
+    will send to external MCP servers. MCP enables AI assistants to:
+    - Discover available tools (functions)
+    - Invoke tools with parameters
+    - Access resources (files, APIs)
+    - Use prompt templates
+
+    **Protocol**: JSON-RPC 2.0 over HTTP/HTTPS
+    **Transport**: POST requests to MCP server endpoint
+    **Content-Type**: application/json
+
+    Reference: https://spec.modelcontextprotocol.io/
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8001/mcp
+    description: Example MCP server endpoint
+
+paths:
+  /mcp:
+    post:
+      summary: MCP JSON-RPC Endpoint
+      description: |
+        All MCP protocol messages are sent as JSON-RPC 2.0 requests
+        to this endpoint. The method field determines the operation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/InitializeRequest'
+                - $ref: '#/components/schemas/ToolsListRequest'
+                - $ref: '#/components/schemas/ToolsCallRequest'
+                - $ref: '#/components/schemas/ResourcesListRequest'
+                - $ref: '#/components/schemas/ResourcesReadRequest'
+                - $ref: '#/components/schemas/PromptsListRequest'
+                - $ref: '#/components/schemas/PromptsGetRequest'
+            examples:
+              initialize:
+                summary: Initialize connection
+                value:
+                  jsonrpc: "2.0"
+                  id: 1
+                  method: "initialize"
+                  params:
+                    protocolVersion: "1.0"
+                    capabilities:
+                      tools:
+                        listChanged: true
+                    clientInfo:
+                      name: "MindFlow"
+                      version: "1.0.0"
+
+              tools_list:
+                summary: List available tools
+                value:
+                  jsonrpc: "2.0"
+                  id: 2
+                  method: "tools/list"
+                  params: {}
+
+              tools_call:
+                summary: Invoke a tool
+                value:
+                  jsonrpc: "2.0"
+                  id: 3
+                  method: "tools/call"
+                  params:
+                    name: "search_files"
+                    arguments:
+                      query: "authentication"
+                      max_results: 5
+
+              resources_list:
+                summary: List available resources
+                value:
+                  jsonrpc: "2.0"
+                  id: 4
+                  method: "resources/list"
+                  params: {}
+
+              resources_read:
+                summary: Read a resource
+                value:
+                  jsonrpc: "2.0"
+                  id: 5
+                  method: "resources/read"
+                  params:
+                    uri: "file:///home/user/notes/project.md"
+
+      responses:
+        '200':
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/InitializeResponse'
+                  - $ref: '#/components/schemas/ToolsListResponse'
+                  - $ref: '#/components/schemas/ToolsCallResponse'
+                  - $ref: '#/components/schemas/ResourcesListResponse'
+                  - $ref: '#/components/schemas/ResourcesReadResponse'
+                  - $ref: '#/components/schemas/PromptsListResponse'
+                  - $ref: '#/components/schemas/PromptsGetResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                initialize_success:
+                  summary: Successful initialization
+                  value:
+                    jsonrpc: "2.0"
+                    id: 1
+                    result:
+                      protocolVersion: "1.0"
+                      capabilities:
+                        tools:
+                          listChanged: true
+                        resources:
+                          subscribe: true
+                      serverInfo:
+                        name: "Example MCP Server"
+                        version: "1.0.0"
+
+                tools_list_success:
+                  summary: List of tools
+                  value:
+                    jsonrpc: "2.0"
+                    id: 2
+                    result:
+                      tools:
+                        - name: "search_files"
+                          description: "Search for files by name or content"
+                          inputSchema:
+                            type: "object"
+                            properties:
+                              query:
+                                type: "string"
+                                description: "Search query"
+                              max_results:
+                                type: "integer"
+                                default: 10
+                            required: ["query"]
+                        - name: "read_file"
+                          description: "Read file contents"
+                          inputSchema:
+                            type: "object"
+                            properties:
+                              path:
+                                type: "string"
+                                description: "File path"
+                            required: ["path"]
+
+                tools_call_success:
+                  summary: Successful tool invocation
+                  value:
+                    jsonrpc: "2.0"
+                    id: 3
+                    result:
+                      content:
+                        - type: "text"
+                          text: "Found 3 files:\n1. src/auth/login.py\n2. src/auth/token.py\n3. tests/test_auth.py"
+
+                tools_call_error:
+                  summary: Tool invocation error
+                  value:
+                    jsonrpc: "2.0"
+                    id: 3
+                    error:
+                      code: -32603
+                      message: "Tool execution failed"
+                      data:
+                        reason: "Permission denied: cannot access /root"
+
+                jsonrpc_error:
+                  summary: JSON-RPC protocol error
+                  value:
+                    jsonrpc: "2.0"
+                    id: 99
+                    error:
+                      code: -32601
+                      message: "Method not found"
+                      data:
+                        method: "unknown/method"
+
+components:
+  schemas:
+    # ===== Base JSON-RPC Schemas =====
+    JSONRPCRequest:
+      type: object
+      required:
+        - jsonrpc
+        - id
+        - method
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+          description: JSON-RPC version (always "2.0")
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+          description: Request identifier
+        method:
+          type: string
+          description: Method name
+        params:
+          type: object
+          description: Method parameters
+
+    JSONRPCResponse:
+      type: object
+      required:
+        - jsonrpc
+        - id
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+        result:
+          type: object
+          description: Success result (mutually exclusive with error)
+        error:
+          $ref: '#/components/schemas/JSONRPCError'
+          description: Error object (mutually exclusive with result)
+
+    JSONRPCError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: integer
+          description: |
+            Error code:
+            -32700: Parse error
+            -32600: Invalid request
+            -32601: Method not found
+            -32602: Invalid params
+            -32603: Internal error
+            -32000 to -32099: Server error (reserved)
+        message:
+          type: string
+          description: Human-readable error message
+        data:
+          type: object
+          description: Additional error information
+
+    # ===== Initialize =====
+    InitializeRequest:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCRequest'
+        - type: object
+          required:
+            - params
+          properties:
+            method:
+              type: string
+              enum: ["initialize"]
+            params:
+              type: object
+              required:
+                - protocolVersion
+                - clientInfo
+              properties:
+                protocolVersion:
+                  type: string
+                  example: "1.0"
+                  description: MCP protocol version
+                capabilities:
+                  type: object
+                  description: Client capabilities
+                  properties:
+                    tools:
+                      type: object
+                      properties:
+                        listChanged:
+                          type: boolean
+                          description: Client supports tool list change notifications
+                    resources:
+                      type: object
+                      properties:
+                        subscribe:
+                          type: boolean
+                          description: Client supports resource subscriptions
+                clientInfo:
+                  type: object
+                  required:
+                    - name
+                    - version
+                  properties:
+                    name:
+                      type: string
+                      example: "MindFlow"
+                    version:
+                      type: string
+                      example: "1.0.0"
+
+    InitializeResponse:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCResponse'
+        - type: object
+          required:
+            - result
+          properties:
+            result:
+              type: object
+              required:
+                - protocolVersion
+                - serverInfo
+              properties:
+                protocolVersion:
+                  type: string
+                  example: "1.0"
+                capabilities:
+                  type: object
+                  properties:
+                    tools:
+                      type: object
+                      properties:
+                        listChanged:
+                          type: boolean
+                    resources:
+                      type: object
+                      properties:
+                        subscribe:
+                          type: boolean
+                        listChanged:
+                          type: boolean
+                    prompts:
+                      type: object
+                      properties:
+                        listChanged:
+                          type: boolean
+                    logging:
+                      type: object
+                      description: Server accepts log messages
+                serverInfo:
+                  type: object
+                  required:
+                    - name
+                    - version
+                  properties:
+                    name:
+                      type: string
+                      example: "Example MCP Server"
+                    version:
+                      type: string
+                      example: "1.0.0"
+
+    # ===== Tools =====
+    ToolsListRequest:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCRequest'
+        - type: object
+          properties:
+            method:
+              type: string
+              enum: ["tools/list"]
+            params:
+              type: object
+              description: No parameters required
+
+    ToolsListResponse:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCResponse'
+        - type: object
+          required:
+            - result
+          properties:
+            result:
+              type: object
+              required:
+                - tools
+              properties:
+                tools:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Tool'
+                nextCursor:
+                  type: string
+                  description: Cursor for pagination (optional)
+
+    Tool:
+      type: object
+      required:
+        - name
+        - description
+        - inputSchema
+      properties:
+        name:
+          type: string
+          description: Unique tool name
+          example: "search_files"
+        description:
+          type: string
+          description: Human-readable tool description
+          example: "Search for files by name or content pattern"
+        inputSchema:
+          type: object
+          description: JSON Schema defining tool parameters
+          required:
+            - type
+            - properties
+          properties:
+            type:
+              type: string
+              enum: ["object"]
+            properties:
+              type: object
+              additionalProperties:
+                type: object
+            required:
+              type: array
+              items:
+                type: string
+
+    ToolsCallRequest:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCRequest'
+        - type: object
+          required:
+            - params
+          properties:
+            method:
+              type: string
+              enum: ["tools/call"]
+            params:
+              type: object
+              required:
+                - name
+                - arguments
+              properties:
+                name:
+                  type: string
+                  description: Tool name to invoke
+                  example: "search_files"
+                arguments:
+                  type: object
+                  description: Tool parameters
+                  example:
+                    query: "authentication"
+                    max_results: 5
+
+    ToolsCallResponse:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCResponse'
+        - type: object
+          required:
+            - result
+          properties:
+            result:
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: array
+                  items:
+                    oneOf:
+                      - $ref: '#/components/schemas/TextContent'
+                      - $ref: '#/components/schemas/ImageContent'
+                      - $ref: '#/components/schemas/ResourceContent'
+                isError:
+                  type: boolean
+                  description: True if tool execution failed
+                  default: false
+
+    TextContent:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          enum: ["text"]
+        text:
+          type: string
+          description: Text content
+          example: "Found 3 files:\n1. src/auth/login.py"
+
+    ImageContent:
+      type: object
+      required:
+        - type
+        - data
+        - mimeType
+      properties:
+        type:
+          type: string
+          enum: ["image"]
+        data:
+          type: string
+          description: Base64-encoded image data
+        mimeType:
+          type: string
+          example: "image/png"
+
+    ResourceContent:
+      type: object
+      required:
+        - type
+        - resource
+      properties:
+        type:
+          type: string
+          enum: ["resource"]
+        resource:
+          type: object
+          required:
+            - uri
+            - text
+          properties:
+            uri:
+              type: string
+              description: Resource URI
+            mimeType:
+              type: string
+            text:
+              type: string
+              description: Resource content
+
+    # ===== Resources =====
+    ResourcesListRequest:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCRequest'
+        - type: object
+          properties:
+            method:
+              type: string
+              enum: ["resources/list"]
+            params:
+              type: object
+
+    ResourcesListResponse:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCResponse'
+        - type: object
+          required:
+            - result
+          properties:
+            result:
+              type: object
+              required:
+                - resources
+              properties:
+                resources:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Resource'
+                nextCursor:
+                  type: string
+
+    Resource:
+      type: object
+      required:
+        - uri
+        - name
+      properties:
+        uri:
+          type: string
+          description: Unique resource URI
+          example: "file:///home/user/notes/project.md"
+        name:
+          type: string
+          description: Human-readable name
+          example: "Project Notes"
+        description:
+          type: string
+          description: Resource description
+        mimeType:
+          type: string
+          example: "text/markdown"
+
+    ResourcesReadRequest:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCRequest'
+        - type: object
+          required:
+            - params
+          properties:
+            method:
+              type: string
+              enum: ["resources/read"]
+            params:
+              type: object
+              required:
+                - uri
+              properties:
+                uri:
+                  type: string
+                  example: "file:///home/user/notes/project.md"
+
+    ResourcesReadResponse:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCResponse'
+        - type: object
+          required:
+            - result
+          properties:
+            result:
+              type: object
+              required:
+                - contents
+              properties:
+                contents:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - uri
+                      - mimeType
+                    properties:
+                      uri:
+                        type: string
+                      mimeType:
+                        type: string
+                      text:
+                        type: string
+                        description: Text content
+                      blob:
+                        type: string
+                        description: Base64-encoded binary content
+
+    # ===== Prompts =====
+    PromptsListRequest:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCRequest'
+        - type: object
+          properties:
+            method:
+              type: string
+              enum: ["prompts/list"]
+            params:
+              type: object
+
+    PromptsListResponse:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCResponse'
+        - type: object
+          required:
+            - result
+          properties:
+            result:
+              type: object
+              required:
+                - prompts
+              properties:
+                prompts:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Prompt'
+                nextCursor:
+                  type: string
+
+    Prompt:
+      type: object
+      required:
+        - name
+        - description
+      properties:
+        name:
+          type: string
+          example: "code_review"
+        description:
+          type: string
+          example: "Review code for best practices and bugs"
+        arguments:
+          type: array
+          items:
+            type: object
+            required:
+              - name
+              - description
+              - required
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              required:
+                type: boolean
+
+    PromptsGetRequest:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCRequest'
+        - type: object
+          required:
+            - params
+          properties:
+            method:
+              type: string
+              enum: ["prompts/get"]
+            params:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                arguments:
+                  type: object
+
+    PromptsGetResponse:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCResponse'
+        - type: object
+          required:
+            - result
+          properties:
+            result:
+              type: object
+              required:
+                - messages
+              properties:
+                description:
+                  type: string
+                messages:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - role
+                      - content
+                    properties:
+                      role:
+                        type: string
+                        enum: ["user", "assistant"]
+                      content:
+                        oneOf:
+                          - type: string
+                          - type: object
+
+    # ===== Error Response =====
+    ErrorResponse:
+      allOf:
+        - $ref: '#/components/schemas/JSONRPCResponse'
+        - type: object
+          required:
+            - error
+          properties:
+            error:
+              $ref: '#/components/schemas/JSONRPCError'
+
+  examples:
+    # Tool invocation examples
+    SearchFilesTool:
+      summary: Search files tool definition
+      value:
+        name: "search_files"
+        description: "Search for files by name or content pattern"
+        inputSchema:
+          type: "object"
+          properties:
+            query:
+              type: "string"
+              description: "Search query (filename or content)"
+            path:
+              type: "string"
+              description: "Directory to search"
+              default: "."
+            max_results:
+              type: "integer"
+              minimum: 1
+              maximum: 100
+              default: 10
+          required: ["query"]
+
+    CalculateTool:
+      summary: Calculator tool definition
+      value:
+        name: "calculate"
+        description: "Evaluate mathematical expression"
+        inputSchema:
+          type: "object"
+          properties:
+            expression:
+              type: "string"
+              description: "Mathematical expression to evaluate"
+              pattern: "^[0-9+\\-*/().\\s]+$"
+          required: ["expression"]
+
+    GitHubSearchTool:
+      summary: GitHub code search tool
+      value:
+        name: "github_search"
+        description: "Search GitHub repositories"
+        inputSchema:
+          type: "object"
+          properties:
+            query:
+              type: "string"
+              description: "Search query"
+            language:
+              type: "string"
+              description: "Programming language filter"
+            sort:
+              type: "string"
+              enum: ["stars", "forks", "updated"]
+              default: "stars"
+          required: ["query"]

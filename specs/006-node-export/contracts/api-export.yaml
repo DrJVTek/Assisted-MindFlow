@@ -1,0 +1,624 @@
+openapi: 3.0.3
+info:
+  title: MindFlow Export API
+  description: |
+    API for exporting nodes to multiple formats (Markdown, HTML, PDF).
+
+    This API enables users to export single nodes or entire reasoning trees
+    with customizable formatting, themes, and metadata inclusion.
+  version: 1.0.0
+  contact:
+    name: MindFlow Team
+
+servers:
+  - url: http://localhost:8000
+    description: Development server
+  - url: https://api.mindflow.example.com
+    description: Production server
+
+tags:
+  - name: exports
+    description: Node export operations
+
+paths:
+  /api/exports/estimate:
+    post:
+      tags:
+        - exports
+      summary: Estimate export size
+      description: |
+        Get size estimate and warnings before creating export.
+        Useful for large trees to warn users about processing time.
+      operationId: estimateExportSize
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - node_id
+                - scope
+                - format
+              properties:
+                node_id:
+                  type: string
+                  description: Node ID to export
+                  example: "n-123e4567"
+                scope:
+                  $ref: '#/components/schemas/ExportScope'
+                format:
+                  $ref: '#/components/schemas/ExportFormat'
+                max_depth:
+                  type: integer
+                  minimum: 1
+                  maximum: 20
+                  description: Maximum tree depth (for descendants)
+                  example: 5
+      responses:
+        '200':
+          description: Size estimate calculated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportSizeEstimate'
+        '404':
+          description: Node not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /api/exports:
+    post:
+      tags:
+        - exports
+      summary: Create export request
+      description: |
+        Create a new export request. The export is generated synchronously
+        and returned as a downloadable file.
+
+        For large exports (500+ nodes), consider using the async endpoint.
+      operationId: createExport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportCreateRequest'
+      responses:
+        '200':
+          description: Export generated successfully
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                enum:
+                  - text/markdown
+                  - text/html
+                  - application/pdf
+              description: MIME type of exported file
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'Suggested filename (e.g., attachment; filename="export.md")'
+            Content-Length:
+              schema:
+                type: integer
+              description: File size in bytes
+          content:
+            text/markdown:
+              schema:
+                type: string
+                format: binary
+            text/html:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Node not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Export too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "export_too_large"
+                message: "Export exceeds maximum size limit (1000 nodes)"
+                details:
+                  node_count: 1500
+                  max_allowed: 1000
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '500':
+          description: Export generation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/exports/async:
+    post:
+      tags:
+        - exports
+      summary: Create async export request
+      description: |
+        Create an asynchronous export request for large exports.
+        Returns a request ID that can be used to check status and download.
+
+        Recommended for exports with 500+ nodes.
+      operationId: createAsyncExport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportCreateRequest'
+      responses:
+        '202':
+          description: Export request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Node not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /api/exports/{request_id}/status:
+    get:
+      tags:
+        - exports
+      summary: Get export status
+      description: Check the status of an async export request
+      operationId: getExportStatus
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Export request ID
+          example: "exp-123e4567"
+      responses:
+        '200':
+          description: Export status retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportStatusResponse'
+        '404':
+          description: Export request not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/exports/{request_id}/download:
+    get:
+      tags:
+        - exports
+      summary: Download completed export
+      description: Download the generated export file (only available when status is 'completed')
+      operationId: downloadExport
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Export request ID
+          example: "exp-123e4567"
+      responses:
+        '200':
+          description: Export file
+          headers:
+            Content-Type:
+              schema:
+                type: string
+              description: MIME type of exported file
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'Suggested filename'
+            Content-Length:
+              schema:
+                type: integer
+              description: File size in bytes
+          content:
+            text/markdown:
+              schema:
+                type: string
+                format: binary
+            text/html:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Export not found or expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Export not yet completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "export_not_ready"
+                message: "Export is still processing"
+                details:
+                  status: "processing"
+                  progress_percent: 45
+
+  /api/exports/{request_id}/cancel:
+    post:
+      tags:
+        - exports
+      summary: Cancel export request
+      description: Cancel an in-progress export request
+      operationId: cancelExport
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Export request ID
+          example: "exp-123e4567"
+      responses:
+        '200':
+          description: Export cancelled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Export cancelled successfully"
+                  request_id:
+                    type: string
+                    example: "exp-123e4567"
+        '404':
+          description: Export request not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Export cannot be cancelled (already completed or failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    ExportScope:
+      type: string
+      enum:
+        - single
+        - with_ancestors
+        - with_descendants
+        - full_tree
+      description: |
+        Scope of nodes to include in export:
+        - `single`: Only the selected node
+        - `with_ancestors`: Node with all ancestors (parent chain)
+        - `with_descendants`: Node with all descendants (children subtree)
+        - `full_tree`: Ancestors + node + descendants
+      example: with_descendants
+
+    ExportFormat:
+      type: string
+      enum:
+        - markdown
+        - html
+        - pdf
+      description: |
+        Output file format:
+        - `markdown`: Plain text with markdown formatting (.md)
+        - `html`: Standalone HTML page with embedded CSS (.html)
+        - `pdf`: Formatted PDF document (.pdf)
+      example: pdf
+
+    ExportTheme:
+      type: string
+      enum:
+        - light
+        - dark
+        - minimal
+      description: |
+        Visual theme for output:
+        - `light`: Light background, dark text
+        - `dark`: Dark background, light text
+        - `minimal`: Simple styling, no metadata
+      default: light
+
+    FontSize:
+      type: string
+      enum:
+        - small
+        - medium
+        - large
+      description: Font size for export output
+      default: medium
+
+    ExportOptions:
+      type: object
+      description: Options to customize export output
+      properties:
+        include_metadata:
+          type: boolean
+          default: true
+          description: Include node metadata (author, dates, tags)
+        include_timestamps:
+          type: boolean
+          default: true
+          description: Include creation/update timestamps
+        include_author:
+          type: boolean
+          default: true
+          description: Include author information
+        include_tags:
+          type: boolean
+          default: true
+          description: Include node tags
+        theme:
+          $ref: '#/components/schemas/ExportTheme'
+        font_size:
+          $ref: '#/components/schemas/FontSize'
+        max_depth:
+          type: integer
+          minimum: 1
+          maximum: 20
+          nullable: true
+          description: Maximum tree depth (for descendants/full_tree)
+          example: 5
+        include_toc:
+          type: boolean
+          nullable: true
+          description: Include table of contents (auto-determined if null)
+        page_breaks:
+          type: boolean
+          default: true
+          description: Include page breaks in PDF exports
+        syntax_highlighting:
+          type: boolean
+          default: true
+          description: Enable code syntax highlighting
+        collapsible_sections:
+          type: boolean
+          default: true
+          description: Enable collapsible sections in HTML exports
+
+    ExportCreateRequest:
+      type: object
+      required:
+        - node_id
+        - format
+      properties:
+        node_id:
+          type: string
+          description: Node ID to export
+          example: "n-123e4567"
+        scope:
+          $ref: '#/components/schemas/ExportScope'
+          default: single
+        format:
+          $ref: '#/components/schemas/ExportFormat'
+        options:
+          $ref: '#/components/schemas/ExportOptions'
+
+    ExportResponse:
+      type: object
+      description: Response after creating async export request
+      required:
+        - request_id
+        - status
+        - estimated_size_nodes
+        - estimated_time_seconds
+      properties:
+        request_id:
+          type: string
+          description: Export request ID for status checking
+          example: "exp-123e4567"
+        status:
+          type: string
+          enum:
+            - pending
+            - processing
+          description: Current export status
+        estimated_size_nodes:
+          type: integer
+          description: Estimated number of nodes to export
+          example: 42
+        estimated_time_seconds:
+          type: integer
+          description: Estimated processing time in seconds
+          example: 5
+        download_url:
+          type: string
+          nullable: true
+          description: URL to download export (available when completed)
+          example: "/api/exports/exp-123e4567/download"
+
+    ExportStatusResponse:
+      type: object
+      required:
+        - request_id
+        - status
+      properties:
+        request_id:
+          type: string
+          example: "exp-123e4567"
+        status:
+          type: string
+          enum:
+            - pending
+            - processing
+            - completed
+            - failed
+            - cancelled
+          description: Current export status
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+          description: Progress percentage (0-100)
+          example: 75
+        error_message:
+          type: string
+          nullable: true
+          description: Error details (only when status is 'failed')
+          example: "PDF generation failed: invalid content encoding"
+        download_url:
+          type: string
+          nullable: true
+          description: URL to download export (only when status is 'completed')
+          example: "/api/exports/exp-123e4567/download"
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When export was completed (ISO 8601)
+          example: "2025-11-21T14:30:00Z"
+
+    ExportSizeEstimate:
+      type: object
+      required:
+        - node_count
+        - estimated_file_size_kb
+        - estimated_time_seconds
+        - warnings
+      properties:
+        node_count:
+          type: integer
+          description: Number of nodes to export
+          example: 250
+        estimated_file_size_kb:
+          type: integer
+          description: Estimated file size in kilobytes
+          example: 2500
+        estimated_time_seconds:
+          type: integer
+          description: Estimated processing time in seconds
+          example: 25
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Warnings about export size or time
+          example:
+            - "Large export (250 nodes). This may take several minutes."
+            - "Estimated file size: 2.5 MB. Large files may be slow to download."
+        recommended_max_depth:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: Recommended depth limit (if export is too large)
+          example: 5
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code
+          example: "node_not_found"
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Node n-123e4567 not found"
+        details:
+          type: object
+          additionalProperties: true
+          description: Additional error details
+          example:
+            node_id: "n-123e4567"
+
+    ValidationError:
+      type: object
+      required:
+        - error
+        - message
+        - validation_errors
+      properties:
+        error:
+          type: string
+          example: "validation_error"
+        message:
+          type: string
+          example: "Request validation failed"
+        validation_errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                example: "options.max_depth"
+              message:
+                type: string
+                example: "must be between 1 and 20"
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: JWT token authentication (if auth is enabled)
+
+# Apply security globally (comment out if auth not implemented yet)
+# security:
+#   - BearerAuth: []

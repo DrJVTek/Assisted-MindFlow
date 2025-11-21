@@ -1,0 +1,295 @@
+/**
+ * Reduced Motion Support - Accessibility
+ *
+ * Respects user's prefers-reduced-motion setting
+ * Provides static fallbacks while maintaining information parity
+ * WCAG 2.1 Level AAA compliance
+ */
+
+/**
+ * Disable all animations and transitions when user prefers reduced motion
+ * Information is preserved through static indicators
+ */
+@media (prefers-reduced-motion: reduce) {
+
+  /* Disable all animations */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Remove will-change hints */
+  * {
+    will-change: auto !important;
+  }
+
+  /* ==============================================
+     STATIC INDICATOR FALLBACKS
+     ============================================== */
+
+  /**
+   * Processing state - static icon instead of spinning
+   */
+  .animate-spin {
+    animation: none;
+    /* Keep icon visible but static */
+    opacity: 1;
+  }
+
+  /**
+   * Pulsing state - solid opacity instead of fading
+   */
+  .animate-pulse {
+    animation: none;
+    opacity: 1;
+  }
+
+  /**
+   * Flowing state - static gradient instead of animated
+   */
+  .animate-flow {
+    animation: none;
+    background-position: 50% 50%;
+  }
+
+  /**
+   * Completion bounce - instant appearance
+   */
+  .animate-bounce-complete {
+    animation: none;
+    transform: scale(1);
+  }
+
+  /**
+   * Fade in - instant appearance
+   */
+  .animate-fade-in {
+    animation: none;
+    opacity: 1;
+  }
+
+  /**
+   * Slide in - instant appearance
+   */
+  .animate-slide-in {
+    animation: none;
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  /**
+   * Shimmer - static gradient
+   */
+  .animate-shimmer {
+    animation: none;
+    background-position: 0% center;
+  }
+
+  /* ==============================================
+     STATIC STATE INDICATORS
+     ============================================== */
+
+  /**
+   * Processing indicator - show text label instead of spinner
+   */
+  .progress-indicator[data-status="processing"]::after {
+    content: " (Processing)";
+    font-size: 0.75rem;
+    color: var(--color-processing, #1976D2);
+    margin-left: 0.5rem;
+  }
+
+  /**
+   * Streaming indicator - show text label
+   */
+  .progress-indicator[data-status="streaming"]::after {
+    content: " (Streaming)";
+    font-size: 0.75rem;
+    color: var(--color-streaming, #1976D2);
+    margin-left: 0.5rem;
+  }
+
+  /**
+   * Queued indicator - show text label with position
+   */
+  .progress-indicator[data-status="queued"]::after {
+    content: " (Queued)";
+    font-size: 0.75rem;
+    color: var(--color-queued, #F57C00);
+    margin-left: 0.5rem;
+  }
+
+  /**
+   * Completed indicator - show checkmark symbol
+   */
+  .progress-indicator[data-status="completed"]::before {
+    content: "✓ ";
+    color: var(--color-completed, #388E3C);
+    font-weight: bold;
+  }
+
+  /**
+   * Failed indicator - show error symbol
+   */
+  .progress-indicator[data-status="failed"]::before {
+    content: "✗ ";
+    color: var(--color-failed, #D32F2F);
+    font-weight: bold;
+  }
+
+  /* ==============================================
+     PRESERVE INFORMATION WITHOUT ANIMATION
+     ============================================== */
+
+  /**
+   * Progress bar - show as solid fill instead of animated
+   */
+  .progress-bar {
+    transition: none;
+  }
+
+  .progress-bar-fill {
+    transition: none;
+    /* Instant update instead of smooth transition */
+  }
+
+  /**
+   * Node expansion - instant resize instead of smooth
+   */
+  .node-content {
+    transition: none;
+  }
+
+  /**
+   * Dashboard slide-in - instant appearance
+   */
+  .aggregate-panel {
+    animation: none;
+    transform: none;
+    opacity: 1;
+  }
+
+  /* ==============================================
+     HOVER AND FOCUS STATES
+     ============================================== */
+
+  /**
+   * Preserve hover feedback without animation
+   * Use instant color changes instead of transitions
+   */
+  .progress-indicator:hover {
+    transition: none;
+    /* Instant color change */
+    background-color: var(--hover-bg, rgba(0, 0, 0, 0.05));
+  }
+
+  /**
+   * Focus ring - instant appearance
+   */
+  .progress-indicator:focus {
+    transition: none;
+    outline: 2px solid var(--focus-color, #1976D2);
+    outline-offset: 2px;
+  }
+
+  /* ==============================================
+     SCREEN READER SUPPORT
+     ============================================== */
+
+  /**
+   * Ensure ARIA live regions are still announced
+   * (CSS doesn't affect screen readers, but keep for completeness)
+   */
+  [aria-live="polite"],
+  [aria-live="assertive"] {
+    /* Screen reader support is maintained */
+  }
+
+  /* ==============================================
+     REDUCED MOTION UTILITIES
+     ============================================== */
+
+  /**
+   * Mark element as reduced-motion compliant
+   */
+  .reduced-motion-safe {
+    /* Element follows reduced-motion guidelines */
+  }
+
+  /**
+   * Force static rendering
+   */
+  .force-static {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
+/* ==============================================
+   ENHANCED CONTRAST FOR ACCESSIBILITY
+   ============================================== */
+
+/**
+ * High contrast mode support
+ * Ensure indicators are visible in Windows High Contrast
+ */
+@media (prefers-contrast: high) {
+
+  .progress-indicator[data-status="processing"] {
+    border: 2px solid currentColor;
+  }
+
+  .progress-indicator[data-status="streaming"] {
+    border: 2px solid currentColor;
+  }
+
+  .progress-indicator[data-status="queued"] {
+    border: 2px solid currentColor;
+  }
+
+  .progress-indicator[data-status="completed"] {
+    border: 2px solid green;
+  }
+
+  .progress-indicator[data-status="failed"] {
+    border: 2px solid red;
+  }
+}
+
+/* ==============================================
+   FORCED COLORS MODE (Windows High Contrast)
+   ============================================== */
+
+@media (forced-colors: active) {
+
+  /**
+   * Use system colors in forced-colors mode
+   * Ensure visibility in Windows High Contrast
+   */
+  .progress-indicator {
+    border: 1px solid CanvasText;
+  }
+
+  .progress-indicator[data-status="processing"],
+  .progress-indicator[data-status="streaming"] {
+    border-color: Highlight;
+  }
+
+  .progress-indicator[data-status="completed"] {
+    border-color: LinkText;
+  }
+
+  .progress-indicator[data-status="failed"] {
+    border-color: CanvasText;
+    outline: 2px solid CanvasText;
+  }
+
+  .progress-bar-fill {
+    background-color: Highlight;
+  }
+}

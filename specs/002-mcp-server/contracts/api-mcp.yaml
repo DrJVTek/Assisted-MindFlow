@@ -1,0 +1,1071 @@
+openapi: 3.0.3
+info:
+  title: MindFlow MCP Server Management API
+  description: |
+    REST API for managing MCP (Model Context Protocol) server configurations,
+    discovering tools, and invoking tool operations.
+
+    This API allows users to:
+    - Configure connections to external MCP servers
+    - Discover available tools, resources, and prompts
+    - Invoke tools with parameters
+    - View tool usage history
+    - Manage tool permissions
+  version: 1.0.0
+  contact:
+    name: MindFlow API Support
+    url: https://github.com/yourusername/mindflow
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development server
+  - url: https://mindflow.example.com/api
+    description: Production server
+
+tags:
+  - name: servers
+    description: MCP server configuration management
+  - name: tools
+    description: Tool discovery and invocation
+  - name: resources
+    description: Resource access from MCP servers
+  - name: prompts
+    description: Prompt template management
+  - name: invocations
+    description: Tool invocation history
+
+paths:
+  # ==================== MCP Servers ====================
+  /mcp/servers:
+    get:
+      tags: [servers]
+      summary: List all MCP servers
+      description: Retrieve list of all configured MCP servers with their status
+      operationId: listMCPServers
+      parameters:
+        - name: enabled
+          in: query
+          description: Filter by enabled status
+          schema:
+            type: boolean
+        - name: status
+          in: query
+          description: Filter by connection status
+          schema:
+            type: string
+            enum: [unknown, connected, disconnected, error]
+        - name: search
+          in: query
+          description: Search servers by name or URL
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of MCP servers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  servers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MCPServer'
+                  total:
+                    type: integer
+                    description: Total number of servers
+              examples:
+                success:
+                  summary: Successful server list retrieval
+                  value:
+                    servers:
+                      - id: 1
+                        name: "Local File Server"
+                        url: "http://localhost:8001"
+                        auth_type: "none"
+                        status: "connected"
+                        enabled: true
+                        tool_count: 3
+                        success_rate: 95.5
+                      - id: 2
+                        name: "GitHub API"
+                        url: "https://mcp.github.example.com"
+                        auth_type: "bearer"
+                        status: "disconnected"
+                        enabled: true
+                        tool_count: 0
+                        success_rate: 0.0
+                    total: 2
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [servers]
+      summary: Add new MCP server
+      description: Register a new MCP server configuration
+      operationId: createMCPServer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPServerCreate'
+            examples:
+              no_auth:
+                summary: Server without authentication
+                value:
+                  name: "Local Calculator"
+                  url: "http://localhost:8002"
+                  auth_type: "none"
+                  enabled: true
+              bearer_auth:
+                summary: Server with bearer token
+                value:
+                  name: "GitHub MCP"
+                  url: "https://mcp.github.example.com"
+                  auth_type: "bearer"
+                  auth_token: "mcp_1234567890abcdef"
+                  enabled: true
+                  timeout_seconds: 60
+      responses:
+        '201':
+          description: Server created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServer'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: Server with this name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Conflict"
+                message: "Server with name 'Local Calculator' already exists"
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /mcp/servers/{serverId}:
+    get:
+      tags: [servers]
+      summary: Get MCP server details
+      description: Retrieve detailed information about a specific MCP server
+      operationId: getMCPServer
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      responses:
+        '200':
+          description: Server details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServer'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags: [servers]
+      summary: Update MCP server
+      description: Update configuration of an existing MCP server
+      operationId: updateMCPServer
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPServerUpdate'
+            examples:
+              update_url:
+                summary: Update server URL
+                value:
+                  url: "http://localhost:8003"
+              update_auth:
+                summary: Update authentication
+                value:
+                  auth_type: "bearer"
+                  auth_token: "new_token_xyz123"
+              disable_server:
+                summary: Disable server
+                value:
+                  enabled: false
+      responses:
+        '200':
+          description: Server updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPServer'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [servers]
+      summary: Delete MCP server
+      description: Remove MCP server configuration and all associated tools/invocations
+      operationId: deleteMCPServer
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      responses:
+        '204':
+          description: Server deleted successfully
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /mcp/servers/{serverId}/test:
+    post:
+      tags: [servers]
+      summary: Test server connection
+      description: |
+        Test connection to MCP server and discover its capabilities.
+        This will attempt to connect, list tools, and update the server status.
+      operationId: testMCPServerConnection
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      responses:
+        '200':
+          description: Connection test result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionTestResponse'
+              examples:
+                success:
+                  summary: Successful connection
+                  value:
+                    success: true
+                    status: "connected"
+                    message: "Connected successfully"
+                    capabilities:
+                      tools:
+                        listChanged: true
+                      resources:
+                        subscribe: true
+                    tool_count: 3
+                    resource_count: 0
+                    prompt_count: 0
+                    response_time_ms: 245
+                failure:
+                  summary: Connection failed
+                  value:
+                    success: false
+                    status: "error"
+                    message: "Connection timeout: server did not respond within 30 seconds"
+                    tool_count: 0
+                    resource_count: 0
+                    prompt_count: 0
+                    response_time_ms: 30000
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /mcp/servers/{serverId}/discover:
+    post:
+      tags: [servers]
+      summary: Discover server tools
+      description: |
+        Discover and refresh the list of tools, resources, and prompts
+        from the MCP server. This updates the cached tool list.
+      operationId: discoverMCPServerTools
+      parameters:
+        - $ref: '#/components/parameters/ServerId'
+      responses:
+        '200':
+          description: Discovery result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolDiscoveryResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ==================== Tools ====================
+  /mcp/tools:
+    get:
+      tags: [tools]
+      summary: List all discovered tools
+      description: |
+        Retrieve list of all tools discovered from all MCP servers.
+        Includes tool metadata, permissions, and usage statistics.
+      operationId: listMCPTools
+      parameters:
+        - name: server_id
+          in: query
+          description: Filter by server ID
+          schema:
+            type: integer
+        - name: enabled
+          in: query
+          description: Filter by enabled status
+          schema:
+            type: boolean
+        - name: search
+          in: query
+          description: Search tools by name or description
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of tools
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MCPTool'
+                  total:
+                    type: integer
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /mcp/tools/{toolId}:
+    get:
+      tags: [tools]
+      summary: Get tool details
+      description: Retrieve detailed information about a specific tool
+      operationId: getMCPTool
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+      responses:
+        '200':
+          description: Tool details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPTool'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      tags: [tools]
+      summary: Update tool permissions
+      description: Update tool enabled status and confirmation requirements
+      operationId: updateMCPTool
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MCPToolUpdate'
+            examples:
+              disable_tool:
+                summary: Disable tool
+                value:
+                  enabled: false
+              require_confirmation:
+                summary: Require user confirmation
+                value:
+                  requires_confirmation: true
+      responses:
+        '200':
+          description: Tool updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPTool'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /mcp/tools/invoke:
+    post:
+      tags: [tools]
+      summary: Invoke a tool
+      description: |
+        Execute a tool with the provided parameters.
+        This creates an invocation record and returns the result.
+      operationId: invokeMCPTool
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolInvocationRequest'
+            examples:
+              search_files:
+                summary: Search for files
+                value:
+                  tool_id: 5
+                  arguments:
+                    query: "authentication"
+                    max_results: 5
+                  session_id: "sess_abc123"
+              calculate:
+                summary: Perform calculation
+                value:
+                  tool_id: 8
+                  arguments:
+                    expression: "2 + 2 * 10"
+      responses:
+        '200':
+          description: Tool invoked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolInvocation'
+              examples:
+                success:
+                  summary: Successful invocation
+                  value:
+                    id: 42
+                    tool_id: 5
+                    tool_name: "search_files"
+                    arguments:
+                      query: "authentication"
+                      max_results: 5
+                    result:
+                      content:
+                        - type: "text"
+                          text: "Found 3 files:\n1. src/auth/login.py\n2. src/auth/token.py\n3. tests/test_auth.py"
+                    status: "success"
+                    started_at: "2025-11-21T10:05:00Z"
+                    completed_at: "2025-11-21T10:05:01.234Z"
+                    duration_ms: 1234
+                error:
+                  summary: Tool execution error
+                  value:
+                    id: 43
+                    tool_id: 5
+                    tool_name: "search_files"
+                    arguments:
+                      query: ""
+                    error_message: "Invalid arguments: query must not be empty"
+                    status: "error"
+                    started_at: "2025-11-21T10:06:00Z"
+                    completed_at: "2025-11-21T10:06:00.123Z"
+                    duration_ms: 123
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          description: Tool disabled or requires confirmation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Forbidden"
+                message: "Tool 'delete_file' is disabled by administrator"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ==================== Invocations ====================
+  /mcp/invocations:
+    get:
+      tags: [invocations]
+      summary: List tool invocations
+      description: |
+        Retrieve history of tool invocations.
+        Supports filtering by tool, server, status, and date range.
+      operationId: listToolInvocations
+      parameters:
+        - name: tool_id
+          in: query
+          description: Filter by tool ID
+          schema:
+            type: integer
+        - name: server_id
+          in: query
+          description: Filter by server ID
+          schema:
+            type: integer
+        - name: status
+          in: query
+          description: Filter by invocation status
+          schema:
+            type: string
+            enum: [pending, running, success, error, timeout, cancelled]
+        - name: session_id
+          in: query
+          description: Filter by session ID
+          schema:
+            type: string
+        - name: date_from
+          in: query
+          description: Filter invocations after this date (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: date_to
+          in: query
+          description: Filter invocations before this date (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+        - name: offset
+          in: query
+          description: Number of results to skip
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: List of invocations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invocations:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ToolInvocation'
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /mcp/invocations/{invocationId}:
+    get:
+      tags: [invocations]
+      summary: Get invocation details
+      description: Retrieve detailed information about a specific tool invocation
+      operationId: getToolInvocation
+      parameters:
+        - $ref: '#/components/parameters/InvocationId'
+      responses:
+        '200':
+          description: Invocation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolInvocation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ==================== Resources ====================
+  /mcp/resources:
+    get:
+      tags: [resources]
+      summary: List available resources
+      description: List all resources exposed by MCP servers
+      operationId: listMCPResources
+      parameters:
+        - name: server_id
+          in: query
+          description: Filter by server ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of resources
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resources:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MCPResource'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ==================== Prompts ====================
+  /mcp/prompts:
+    get:
+      tags: [prompts]
+      summary: List available prompts
+      description: List all prompt templates from MCP servers
+      operationId: listMCPPrompts
+      parameters:
+        - name: server_id
+          in: query
+          description: Filter by server ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of prompts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MCPPrompt'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+# ==================== Components ====================
+components:
+  parameters:
+    ServerId:
+      name: serverId
+      in: path
+      required: true
+      description: MCP server ID
+      schema:
+        type: integer
+        minimum: 1
+
+    ToolId:
+      name: toolId
+      in: path
+      required: true
+      description: Tool ID
+      schema:
+        type: integer
+        minimum: 1
+
+    InvocationId:
+      name: invocationId
+      in: path
+      required: true
+      description: Invocation ID
+      schema:
+        type: integer
+        minimum: 1
+
+  schemas:
+    # ===== Server Schemas =====
+    MCPServerCreate:
+      type: object
+      required:
+        - name
+        - url
+        - auth_type
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          pattern: '^[a-zA-Z0-9\s\-_]+$'
+          description: Unique server name
+          example: "Local File Server"
+        url:
+          type: string
+          format: uri
+          maxLength: 1024
+          description: MCP server endpoint URL
+          example: "http://localhost:8001"
+        description:
+          type: string
+          description: Optional server description
+          example: "File system operations tool"
+        auth_type:
+          type: string
+          enum: [none, bearer, api_key, oauth2]
+          description: Authentication method
+          default: "none"
+        auth_token:
+          type: string
+          description: Bearer token or API key
+          example: "mcp_1234567890abcdef"
+        auth_header:
+          type: string
+          description: Header name for API key authentication
+          example: "X-API-Key"
+        enabled:
+          type: boolean
+          description: Whether server is enabled
+          default: true
+        timeout_seconds:
+          type: integer
+          minimum: 5
+          maximum: 300
+          default: 30
+          description: Request timeout in seconds
+
+    MCPServerUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        url:
+          type: string
+          format: uri
+          maxLength: 1024
+        description:
+          type: string
+        auth_type:
+          type: string
+          enum: [none, bearer, api_key, oauth2]
+        auth_token:
+          type: string
+        auth_header:
+          type: string
+        enabled:
+          type: boolean
+        timeout_seconds:
+          type: integer
+          minimum: 5
+          maximum: 300
+
+    MCPServer:
+      type: object
+      required:
+        - id
+        - name
+        - url
+        - auth_type
+        - status
+        - enabled
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          description: Server ID
+        name:
+          type: string
+          description: Server name
+        url:
+          type: string
+          description: Server URL
+        description:
+          type: string
+          nullable: true
+          description: Server description
+        auth_type:
+          type: string
+          enum: [none, bearer, api_key, oauth2]
+        status:
+          type: string
+          enum: [unknown, connected, disconnected, error]
+          description: Connection status
+        enabled:
+          type: boolean
+          description: Whether server is enabled
+        last_connected:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last successful connection timestamp
+        last_error:
+          type: string
+          nullable: true
+          description: Last error message
+        capabilities:
+          type: object
+          nullable: true
+          description: Server capabilities
+        tool_count:
+          type: integer
+          description: Number of discovered tools
+        resource_count:
+          type: integer
+          description: Number of discovered resources
+        prompt_count:
+          type: integer
+          description: Number of discovered prompts
+        success_rate:
+          type: number
+          format: float
+          description: Tool invocation success rate (0-100)
+        avg_response_time_ms:
+          type: integer
+          nullable: true
+          description: Average response time in milliseconds
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ===== Tool Schemas =====
+    MCPTool:
+      type: object
+      required:
+        - id
+        - server_id
+        - server_name
+        - name
+        - description
+        - input_schema
+        - enabled
+        - discovered_at
+      properties:
+        id:
+          type: integer
+        server_id:
+          type: integer
+        server_name:
+          type: string
+        name:
+          type: string
+          description: Tool name
+        description:
+          type: string
+          description: Tool description
+        input_schema:
+          type: object
+          description: JSON Schema for tool parameters
+        enabled:
+          type: boolean
+        requires_confirmation:
+          type: boolean
+        success_rate:
+          type: number
+          format: float
+        invocation_count:
+          type: integer
+        discovered_at:
+          type: string
+          format: date-time
+
+    MCPToolUpdate:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        requires_confirmation:
+          type: boolean
+
+    # ===== Invocation Schemas =====
+    ToolInvocationRequest:
+      type: object
+      required:
+        - tool_id
+        - arguments
+      properties:
+        tool_id:
+          type: integer
+          description: ID of tool to invoke
+        arguments:
+          type: object
+          description: Tool parameters
+        session_id:
+          type: string
+          description: Session identifier
+        conversation_id:
+          type: string
+          description: Conversation identifier
+
+    ToolInvocation:
+      type: object
+      required:
+        - id
+        - tool_id
+        - tool_name
+        - arguments
+        - status
+        - started_at
+      properties:
+        id:
+          type: integer
+        tool_id:
+          type: integer
+        tool_name:
+          type: string
+        arguments:
+          type: object
+        result:
+          type: object
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, running, success, error, timeout, cancelled]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        duration_ms:
+          type: integer
+          nullable: true
+
+    # ===== Test/Discovery Schemas =====
+    ConnectionTestResponse:
+      type: object
+      required:
+        - success
+        - status
+        - message
+        - tool_count
+        - response_time_ms
+      properties:
+        success:
+          type: boolean
+        status:
+          type: string
+          enum: [unknown, connected, disconnected, error]
+        message:
+          type: string
+        capabilities:
+          type: object
+          nullable: true
+        tool_count:
+          type: integer
+        resource_count:
+          type: integer
+        prompt_count:
+          type: integer
+        response_time_ms:
+          type: integer
+
+    ToolDiscoveryResponse:
+      type: object
+      required:
+        - server_id
+        - server_name
+        - success
+        - message
+      properties:
+        server_id:
+          type: integer
+        server_name:
+          type: string
+        tools_discovered:
+          type: integer
+        tools_updated:
+          type: integer
+        resources_discovered:
+          type: integer
+        prompts_discovered:
+          type: integer
+        success:
+          type: boolean
+        message:
+          type: string
+
+    # ===== Resource/Prompt Schemas =====
+    MCPResource:
+      type: object
+      required:
+        - id
+        - server_id
+        - uri
+        - name
+        - mime_type
+      properties:
+        id:
+          type: integer
+        server_id:
+          type: integer
+        uri:
+          type: string
+        name:
+          type: string
+        mime_type:
+          type: string
+        description:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+
+    MCPPrompt:
+      type: object
+      required:
+        - id
+        - server_id
+        - name
+        - description
+      properties:
+        id:
+          type: integer
+        server_id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        arguments:
+          type: array
+          items:
+            type: object
+        enabled:
+          type: boolean
+
+    # ===== Error Schemas =====
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error type
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          description: Additional error details
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Not Found"
+            message: "MCP server with ID 123 not found"
+
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Validation Error"
+            message: "Invalid request body"
+            details:
+              name: "Name must be alphanumeric"
+              url: "URL must be valid HTTP/HTTPS"
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Internal Server Error"
+            message: "An unexpected error occurred"

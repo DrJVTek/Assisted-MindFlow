@@ -1,0 +1,306 @@
+openapi: 3.0.3
+info:
+  title: MindFlow Icon API
+  description: API endpoints for node icon customization
+  version: 1.0.0
+  contact:
+    name: MindFlow Team
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+
+paths:
+  /api/icons/suggest:
+    post:
+      summary: Get AI-suggested icon for node content
+      description: |
+        Uses LLM to suggest appropriate icon based on node type and content.
+        Returns suggestion within 3 seconds or times out gracefully.
+      operationId: suggestIcon
+      tags:
+        - icons
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IconSuggestionRequest'
+            examples:
+              question_node:
+                summary: Question node about performance
+                value:
+                  node_type: question
+                  content: "What are the key performance metrics for our API?"
+                  current_icon: null
+              hypothesis_with_current:
+                summary: Hypothesis with existing icon
+                value:
+                  node_type: hypothesis
+                  content: "Caching will improve response times by 50%"
+                  current_icon: "zap"
+      responses:
+        '200':
+          description: Icon suggestion successfully generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IconSuggestionResponse'
+              examples:
+                performance_suggestion:
+                  value:
+                    suggested_icon: "gauge"
+                    confidence: 0.85
+                    reasoning: "Performance metrics commonly represented by gauge/meter icons"
+                cache_suggestion:
+                  value:
+                    suggested_icon: "database"
+                    confidence: 0.92
+                    reasoning: "Caching related to data storage and retrieval"
+        '400':
+          description: Invalid request (bad node_type, content too long, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Invalid node_type"
+                detail: "node_type must be one of: question, answer, hypothesis, evaluation, note, summary, plan"
+        '408':
+          description: Request timeout (LLM took longer than 3 seconds)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Suggestion timeout"
+                detail: "LLM suggestion exceeded 3 second timeout"
+        '500':
+          description: Internal server error (LLM unavailable, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "LLM service unavailable"
+                detail: "Could not connect to LLM provider"
+
+  /api/icons/registry:
+    get:
+      summary: Get list of all available icons
+      description: |
+        Returns metadata for all available lucide-react icons.
+        Used by frontend to populate icon picker.
+      operationId: getIconRegistry
+      tags:
+        - icons
+      parameters:
+        - name: category
+          in: query
+          description: Filter icons by category
+          required: false
+          schema:
+            type: string
+            enum:
+              - communication
+              - objects
+              - symbols
+              - interface
+              - media
+              - nature
+              - people
+              - other
+        - name: search
+          in: query
+          description: Search icons by name or keywords
+          required: false
+          schema:
+            type: string
+            maxLength: 50
+      responses:
+        '200':
+          description: Icon registry successfully retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  icons:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IconMetadata'
+                  total:
+                    type: integer
+                    description: Total number of icons (before filtering)
+              example:
+                total: 532
+                icons:
+                  - name: "heart"
+                    category: "symbols"
+                    keywords: ["love", "like", "favorite"]
+                  - name: "star"
+                    category: "symbols"
+                    keywords: ["favorite", "rating", "bookmark"]
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/icons/validate:
+    post:
+      summary: Validate icon name
+      description: |
+        Checks if an icon name is valid and available in lucide-react library.
+        Used by frontend before saving custom icon to metadata.
+      operationId: validateIcon
+      tags:
+        - icons
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                icon_name:
+                  type: string
+                  pattern: '^[a-z][a-z0-9-]*$'
+                  maxLength: 50
+              required:
+                - icon_name
+            example:
+              icon_name: "heart"
+      responses:
+        '200':
+          description: Icon validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  icon_name:
+                    type: string
+                  message:
+                    type: string
+              examples:
+                valid_icon:
+                  value:
+                    valid: true
+                    icon_name: "heart"
+                    message: "Icon is valid"
+                invalid_icon:
+                  value:
+                    valid: false
+                    icon_name: "invalid-icon-name"
+                    message: "Icon not found in lucide-react library"
+        '400':
+          description: Malformed request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    IconSuggestionRequest:
+      type: object
+      required:
+        - node_type
+        - content
+      properties:
+        node_type:
+          type: string
+          enum:
+            - question
+            - answer
+            - note
+            - hypothesis
+            - evaluation
+            - summary
+            - plan
+            - group_meta
+            - comment
+            - stop
+          description: Type of node requesting icon suggestion
+        content:
+          type: string
+          maxLength: 500
+          description: Node content (will be truncated to 200 chars for LLM prompt)
+        current_icon:
+          type: string
+          nullable: true
+          pattern: '^[a-z][a-z0-9-]*$'
+          maxLength: 50
+          description: Current icon name (if refining suggestion)
+
+    IconSuggestionResponse:
+      type: object
+      required:
+        - suggested_icon
+        - confidence
+      properties:
+        suggested_icon:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          maxLength: 50
+          description: Suggested lucide-react icon name
+        confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: LLM confidence in suggestion (0.0 to 1.0)
+        reasoning:
+          type: string
+          nullable: true
+          maxLength: 200
+          description: Optional explanation for why this icon was suggested
+
+    IconMetadata:
+      type: object
+      required:
+        - name
+        - category
+        - keywords
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          description: Icon name (lucide-react identifier)
+        category:
+          type: string
+          enum:
+            - communication
+            - objects
+            - symbols
+            - interface
+            - media
+            - nature
+            - people
+            - other
+          description: Icon category for organization
+        keywords:
+          type: array
+          items:
+            type: string
+          description: Keywords for search functionality
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+        detail:
+          type: string
+          description: Detailed error information
+
+tags:
+  - name: icons
+    description: Icon customization and suggestion endpoints

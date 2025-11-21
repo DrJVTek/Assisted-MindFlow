@@ -7,7 +7,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mindflow.api.routes import graphs, viewport, canvases, subgraphs
+from mindflow.api.routes import graphs, viewport, canvases, subgraphs, llm_operations
 from mindflow.api.demo_data import create_demo_graph
 
 app = FastAPI(
@@ -52,6 +52,7 @@ app.include_router(graphs.router, prefix="/api")
 app.include_router(viewport.router, prefix="/api")
 app.include_router(canvases.router, prefix="/api")
 app.include_router(subgraphs.router, prefix="/api")
+app.include_router(llm_operations.router, prefix="/api")
 
 
 @app.get("/")

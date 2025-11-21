@@ -41,6 +41,7 @@ import { NodeCreator } from './NodeCreator';
 import { NodeEditor } from './NodeEditor';
 import { CascadeRegenDialog } from './CascadeRegenDialog';
 import { VersionHistory } from './VersionHistory';
+import { LLMDialog } from './LLMDialog';
 import { CanvasNavigator } from '../features/canvas/components/CanvasNavigator';
 import { api } from '../services/api';
 import { useCascadeRegen } from '../features/llm/hooks/useCascadeRegen';
@@ -110,6 +111,10 @@ function CanvasInner() {
   // Version history state
   const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
   const [versionHistoryNodeId, setVersionHistoryNodeId] = useState<string | null>(null);
+
+  // LLM dialog state
+  const [llmDialogOpen, setLLMDialogOpen] = useState(false);
+  const [llmNodeId, setLLMNodeId] = useState<string | null>(null);
 
   // Local state for nodes and edges (synced with ReactFlow)
   const [localNodes, setLocalNodes] = useState<any[]>([]);
@@ -413,6 +418,14 @@ function CanvasInner() {
     if (contextMenu?.nodeId) {
       setVersionHistoryNodeId(contextMenu.nodeId);
       setVersionHistoryOpen(true);
+      closeContextMenu();
+    }
+  }, [contextMenu, closeContextMenu]);
+
+  const handleAskLLM = useCallback(() => {
+    if (contextMenu?.nodeId) {
+      setLLMNodeId(contextMenu.nodeId);
+      setLLMDialogOpen(true);
       closeContextMenu();
     }
   }, [contextMenu, closeContextMenu]);
@@ -960,6 +973,7 @@ function CanvasInner() {
           onEdit={contextMenu.type === 'node' ? handleEditNode : undefined}
           onDelete={contextMenu.type === 'node' ? handleDeleteNode : undefined}
           onAddChild={contextMenu.type === 'node' ? handleAddChildNode : undefined}
+          onAskLLM={contextMenu.type === 'node' ? handleAskLLM : undefined}
           onViewHistory={contextMenu.type === 'node' ? handleViewHistory : undefined}
           onSettings={contextMenu.type === 'canvas' ? () => setSettingsPanelOpen(true) : undefined}
         />
@@ -1011,6 +1025,16 @@ function CanvasInner() {
             // Refresh graph data after restore
             window.location.reload(); // Simple approach - reload to get latest data
           }}
+        />
+      )}
+
+      {/* LLM Dialog */}
+      {llmDialogOpen && llmNodeId && graphId && (
+        <LLMDialog
+          isOpen={llmDialogOpen}
+          onClose={() => setLLMDialogOpen(false)}
+          nodeId={llmNodeId}
+          graphId={graphId}
         />
       )}
       </div>

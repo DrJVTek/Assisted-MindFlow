@@ -25,7 +25,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { UUID } from '../types/uuid';
-import { useLLMOperationsStore, OperationStatus } from '../stores/llmOperationsStore';
+import { useLLMOperationsStore } from '../stores/llmOperationsStore';
+import type { OperationStatus } from '../stores/llmOperationsStore';
 import { useStreamingContentStore } from '../stores/streamingContentStore';
 
 export interface UseStreamingContentOptions {

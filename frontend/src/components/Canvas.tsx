@@ -42,6 +42,7 @@ import { NodeEditor } from './NodeEditor';
 import { CascadeRegenDialog } from './CascadeRegenDialog';
 import { VersionHistory } from './VersionHistory';
 import { LLMDialog } from './LLMDialog';
+import { AggregatePanel } from './AggregatePanel';
 import { CanvasNavigator } from '../features/canvas/components/CanvasNavigator';
 import { api } from '../services/api';
 import { useCascadeRegen } from '../features/llm/hooks/useCascadeRegen';
@@ -580,6 +581,26 @@ function CanvasInner() {
     window.location.reload();
   }, []);
 
+  // Handle navigation to node from AggregatePanel
+  const handleNavigateToNode = useCallback((nodeId: string) => {
+    // Find node in local nodes
+    const node = localNodes.find(n => n.id === nodeId);
+    if (!node) {
+      console.warn('Node not found:', nodeId);
+      return;
+    }
+
+    // Pan to node with smooth transition
+    reactFlowInstance.setCenter(
+      node.position.x + (node.width || 200) / 2,
+      node.position.y + (node.height || 100) / 2,
+      { zoom: 1.5, duration: 800 }
+    );
+
+    // Select the node
+    selectNode(nodeId);
+  }, [localNodes, reactFlowInstance, selectNode]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1035,6 +1056,15 @@ function CanvasInner() {
           onClose={() => setLLMDialogOpen(false)}
           nodeId={llmNodeId}
           graphId={graphId}
+        />
+      )}
+
+      {/* Aggregate Panel - Multi-operation dashboard */}
+      {graphId && (
+        <AggregatePanel
+          graphId={graphId}
+          onNavigateToNode={handleNavigateToNode}
+          initialCollapsed={false}
         />
       )}
       </div>

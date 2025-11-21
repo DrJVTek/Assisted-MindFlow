@@ -83,6 +83,10 @@ class Graph(BaseModel):
     groups: Dict[UUID, Group] = Field(default_factory=dict)
     comments: Dict[UUID, Comment] = Field(default_factory=dict)
 
+    # Multi-canvas feature additions
+    subgraph_instances: Dict[UUID, dict] = Field(default_factory=dict)  # UUID -> SubGraphInstance
+    complexity_score: int = Field(default=0, ge=0)
+
     def to_json(self) -> str:
         """Serialize graph to JSON string.
 

@@ -4,7 +4,7 @@
  */
 
 import axios, { type AxiosInstance, type AxiosError } from 'axios';
-import type { Graph } from '../types/graph';
+import type { Graph, NodeVersion } from '../types/graph';
 import type { CanvasViewport } from '../types/canvas';
 
 /**
@@ -133,6 +133,7 @@ export const api = {
       importance?: number;
       tags?: string[];
       status?: string;
+      position?: { x: number; y: number };
     }
   ): Promise<any> => {
     const response = await apiClient.put(`/graphs/${graphId}/nodes/${nodeId}`, updates);
@@ -140,10 +141,184 @@ export const api = {
   },
 
   /**
+   * Bulk update node positions (concurrent updates)
+   */
+  updateNodePositions: async (
+    graphId: string,
+    positions: Array<{ nodeId: string; position: { x: number; y: number } }>
+  ): Promise<{ success: boolean; updated: number; errors: Array<{ nodeId: string; error: string }> }> => {
+    const results = await Promise.allSettled(
+      positions.map(({ nodeId, position }) =>
+        apiClient.put(`/graphs/${graphId}/nodes/${nodeId}`, { position })
+      )
+    );
+
+    const errors: Array<{ nodeId: string; error: string }> = [];
+    let updated = 0;
+
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        updated++;
+      } else {
+        errors.push({
+          nodeId: positions[index].nodeId,
+          error: result.reason.message || 'Unknown error',
+        });
+      }
+    });
+
+    return {
+      success: errors.length === 0,
+      updated,
+      errors,
+    };
+  },
+
+  /**
    * Delete a node
    */
   deleteNode: async (graphId: string, nodeId: string): Promise<void> => {
     await apiClient.delete(`/graphs/${graphId}/nodes/${nodeId}`);
+  },
+
+  /**
+   * Regenerate cascade from a modified node
+   */
+  regenerateCascade: async (
+    graphId: string,
+    modifiedNodeId: string,
+    options?: {
+      llmProvider?: string;
+      llmModel?: string;
+    }
+  ): Promise<{
+    success: boolean;
+    affected_nodes: string[];
+    regenerated_count: number;
+    errors: Array<{ node_id: string; error: string }>;
+    message: string;
+  }> => {
+    const response = await apiClient.post(`/graphs/${graphId}/regenerate-cascade`, {
+      modified_node_id: modifiedNodeId,
+      llm_provider: options?.llmProvider || 'mock',
+      llm_model: options?.llmModel || 'mock-model',
+    });
+    return response.data;
+  },
+
+  // ============================================================================
+  // GROUP METHODS
+  // ============================================================================
+
+  /**
+   * Create a new group
+   */
+  createGroup: async (
+    graphId: string,
+    groupData: {
+      label: string;
+      kind?: string;
+      color?: string;
+      pinned_nodes?: string[];
+      tags?: string[];
+      parent_group?: string;
+    }
+  ): Promise<any> => {
+    const response = await apiClient.post(`/graphs/${graphId}/groups`, groupData);
+    return response.data;
+  },
+
+  /**
+   * Update an existing group
+   */
+  updateGroup: async (
+    graphId: string,
+    groupId: string,
+    updates: {
+      label?: string;
+      color?: string;
+      pinned_nodes?: string[];
+      tags?: string[];
+    }
+  ): Promise<any> => {
+    const response = await apiClient.put(`/graphs/${graphId}/groups/${groupId}`, updates);
+    return response.data;
+  },
+
+  /**
+   * Delete a group
+   */
+  deleteGroup: async (graphId: string, groupId: string): Promise<void> => {
+    await apiClient.delete(`/graphs/${graphId}/groups/${groupId}`);
+  },
+
+  // ============================================================================
+  // COMMENT METHODS
+  // ============================================================================
+
+  /**
+   * Create a new comment
+   */
+  createComment: async (
+    graphId: string,
+    commentData: {
+      content: string;
+      author?: string;
+      node_id?: string;
+      edge?: [string, string];
+      position?: { x: number; y: number };
+    }
+  ): Promise<any> => {
+    const response = await apiClient.post(`/graphs/${graphId}/comments`, commentData);
+    return response.data;
+  },
+
+  /**
+   * Update an existing comment
+   */
+  updateComment: async (
+    graphId: string,
+    commentId: string,
+    updates: {
+      content: string;
+    }
+  ): Promise<any> => {
+    const response = await apiClient.put(`/graphs/${graphId}/comments/${commentId}`, updates);
+    return response.data;
+  },
+
+  /**
+   * Delete a comment
+   */
+  deleteComment: async (graphId: string, commentId: string): Promise<void> => {
+    await apiClient.delete(`/graphs/${graphId}/comments/${commentId}`);
+  },
+
+  // ============================================================================
+  // VERSION HISTORY METHODS
+  // ============================================================================
+
+  /**
+   * Get all versions for a node
+   */
+  getNodeVersions: async (graphId: string, nodeId: string): Promise<NodeVersion[]> => {
+    const response = await apiClient.get(`/graphs/${graphId}/nodes/${nodeId}/versions`);
+    return response.data;
+  },
+
+  /**
+   * Restore a previous version of a node
+   */
+  restoreNodeVersion: async (
+    graphId: string,
+    nodeId: string,
+    versionId: string
+  ): Promise<any> => {
+    const response = await apiClient.post(
+      `/graphs/${graphId}/nodes/${nodeId}/versions/${versionId}/restore`,
+      {}
+    );
+    return response.data;
   },
 };
 

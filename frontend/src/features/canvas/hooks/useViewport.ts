@@ -25,7 +25,7 @@ type Viewport = {
  *
  * @param graphId - UUID of the current graph (for localStorage key)
  */
-export function useViewport(graphId: string | null) {
+export function useViewport(graphId: string | null | undefined) {
   const reactFlowInstance = useReactFlow();
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 

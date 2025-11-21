@@ -195,6 +195,59 @@ export function connectionLineToReactFlowEdge(connection: ConnectionLine): any {
 }
 
 /**
+ * Transform a Group to React Flow node format
+ */
+export function groupToReactFlowNode(group: any, index: number): any {
+  // Position groups in a staggered layout if no position is set
+  const defaultPosition = {
+    x: 100 + (index * 400),
+    y: 100 + (index * 300),
+  };
+
+  return {
+    id: group.id,
+    type: 'group',
+    position: defaultPosition,
+    data: {
+      label: group.label,
+      kind: group.kind,
+      color: group.meta?.color,
+      pinned_nodes: group.meta?.pinned_nodes || [],
+      tags: group.meta?.tags || [],
+    },
+    style: {
+      width: 400,
+      height: 300,
+      zIndex: -1, // Render behind regular nodes
+    },
+  };
+}
+
+/**
+ * Transform a Comment to React Flow node format
+ */
+export function commentToReactFlowNode(comment: any, index: number): any {
+  // Position comments in a staggered layout if no position is set
+  const defaultPosition = {
+    x: 500 + (index * 280),
+    y: 500 + (index * 200),
+  };
+
+  return {
+    id: comment.id,
+    type: 'comment',
+    position: defaultPosition,
+    data: {
+      content: comment.content,
+      author: comment.author,
+      created_at: comment.created_at,
+      attached_to: comment.attached_to,
+    },
+    draggable: true,
+  };
+}
+
+/**
  * Transform complete Graph to React Flow format
  */
 export function transformGraphToReactFlow(graph: Graph): {
@@ -203,8 +256,21 @@ export function transformGraphToReactFlow(graph: Graph): {
 } {
   const { nodes: visualNodes, edges: connectionLines } = transformGraphToCanvas(graph);
 
+  // Transform regular nodes
+  const regularNodes = visualNodes.map(visualNodeToReactFlowNode);
+
+  // Transform groups
+  const groupNodes = Object.values(graph.groups || {}).map((group, index) =>
+    groupToReactFlowNode(group, index)
+  );
+
+  // Transform comments
+  const commentNodes = Object.values(graph.comments || {}).map((comment, index) =>
+    commentToReactFlowNode(comment, index)
+  );
+
   return {
-    nodes: visualNodes.map(visualNodeToReactFlowNode),
+    nodes: [...groupNodes, ...regularNodes, ...commentNodes], // Groups render behind, comments on top
     edges: connectionLines.map(connectionLineToReactFlowEdge),
   };
 }

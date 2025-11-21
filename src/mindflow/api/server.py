@@ -7,7 +7,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mindflow.api.routes import graphs, viewport
+from mindflow.api.routes import graphs, viewport, canvases, subgraphs
 from mindflow.api.demo_data import create_demo_graph
 
 app = FastAPI(
@@ -16,13 +16,14 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Initialize demo data on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize demo graph data."""
-    demo_graph = create_demo_graph()
-    graphs.add_graph_to_storage(demo_graph)
-    print(f"[OK] Demo graph loaded: {demo_graph.id}")
+# Demo data disabled - users create their own canvases
+# Uncomment below to load demo graph on startup:
+# @app.on_event("startup")
+# async def startup_event():
+#     """Initialize demo graph data."""
+#     demo_graph = create_demo_graph()
+#     graphs.add_graph_to_storage(demo_graph)
+#     print(f"[OK] Demo graph loaded: {demo_graph.id}")
 
 # Configure CORS based on environment
 ENV = os.getenv("ENV", "development")
@@ -49,6 +50,8 @@ app.add_middleware(
 # Register API routes
 app.include_router(graphs.router, prefix="/api")
 app.include_router(viewport.router, prefix="/api")
+app.include_router(canvases.router, prefix="/api")
+app.include_router(subgraphs.router, prefix="/api")
 
 
 @app.get("/")

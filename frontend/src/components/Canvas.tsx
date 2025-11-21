@@ -21,24 +21,33 @@ import ReactFlow, {
   ReactFlowProvider,
   Panel,
   useReactFlow,
+  applyNodeChanges,
 } from 'reactflow';
-import { Settings } from 'lucide-react';
+import { Settings, RefreshCw, Undo, Redo } from 'lucide-react';
 import 'reactflow/dist/style.css';
 
 import { useCanvasStore } from '../stores/canvasStore';
 import { useGraphData } from '../features/canvas/hooks/useGraphData';
 import { useViewport } from '../features/canvas/hooks/useViewport';
+import { useLayout } from '../features/canvas/hooks/useLayout';
 import { transformGraphToReactFlow } from '../features/canvas/utils/transform';
 import { MIN_ZOOM, MAX_ZOOM, formatZoomPercentage } from '../features/canvas/utils/viewport';
 import { CustomNode } from './Node';
+import { GroupNode } from './GroupNode';
+import { CommentNode } from './CommentNode';
 import { SettingsPanel } from './SettingsPanel';
 import { ContextMenu } from './ContextMenu';
 import { NodeCreator } from './NodeCreator';
 import { NodeEditor } from './NodeEditor';
+import { CascadeRegenDialog } from './CascadeRegenDialog';
+import { VersionHistory } from './VersionHistory';
+import { CanvasNavigator } from '../features/canvas/components/CanvasNavigator';
 import { api } from '../services/api';
+import { useCascadeRegen } from '../features/llm/hooks/useCascadeRegen';
+import { getAffectedNodes } from '../features/llm/utils/cascade';
 
 // Type for context menu (defined here to avoid import issues)
-type ContextMenuType = 'canvas' | 'node';
+type ContextMenuType = 'canvas' | 'node' | 'group';
 
 // Lazy load DetailPanel for better performance
 const DetailPanel = lazy(() => import('./DetailPanel').then(module => ({ default: module.DetailPanel })));
@@ -46,13 +55,8 @@ const DetailPanel = lazy(() => import('./DetailPanel').then(module => ({ default
 // Register custom node types
 const nodeTypes = {
   custom: CustomNode,
-};
-
-// Viewport type (React Flow's internal type - not exported)
-type Viewport = {
-  x: number;
-  y: number;
-  zoom: number;
+  group: GroupNode,
+  comment: CommentNode,
 };
 
 // Node type (React Flow's internal type - not exported)
@@ -76,7 +80,7 @@ export function Canvas() {
  * Inner Canvas component with React Flow
  */
 function CanvasInner() {
-  const { selectNode, preferences, selectedNodeId } = useCanvasStore();
+  const { selectNode, preferences, selectedNodeId, createCanvas, canvases, activeCanvasId, fetchCanvases } = useCanvasStore();
   const [currentZoom, setCurrentZoom] = useState(1.0);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const reactFlowInstance = useReactFlow();
@@ -98,14 +102,47 @@ function CanvasInner() {
   const [nodeEditorOpen, setNodeEditorOpen] = useState(false);
   const [nodeBeingEdited, setNodeBeingEdited] = useState<string | null>(null);
 
-  // TODO: Get graphId from route params or props (hardcoded for now)
-  const graphId = '550e8400-e29b-41d4-a716-446655440000'; // Demo graph UUID
+  // Cascade regeneration state
+  const [cascadeDialogOpen, setCascadeDialogOpen] = useState(false);
+  const [pendingCascadeNodeId, setPendingCascadeNodeId] = useState<string | null>(null);
+  const { isRegenerating, regenerateCascade } = useCascadeRegen();
 
-  // Load graph data from API
-  const { graphData, isLoading, error } = useGraphData(graphId);
+  // Version history state
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  const [versionHistoryNodeId, setVersionHistoryNodeId] = useState<string | null>(null);
+
+  // Local state for nodes and edges (synced with ReactFlow)
+  const [localNodes, setLocalNodes] = useState<any[]>([]);
+  const [localEdges, setLocalEdges] = useState<any[]>([]);
+
+  // Multi-selection state
+  const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
+
+  // Load canvases on mount
+  useEffect(() => {
+    fetchCanvases();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
+
+  // Get graphId from active canvas
+  const activeCanvas = canvases.find(c => c.id === activeCanvasId);
+  const graphId = activeCanvas?.graph_id;
+
+  // Load graph data from API (only if we have an active canvas)
+  const { graphData, isLoading, error } = useGraphData(graphId || '');
 
   // Viewport management with persistence
   const { saveViewport, fitView, zoomIn, zoomOut } = useViewport(graphId);
+
+  // Layout reorganization with undo/redo
+  const {
+    handleReorganize,
+    isLoading: isReorganizing,
+    undo: undoReorganize,
+    redo: redoReorganize,
+    canUndo,
+    canRedo,
+  } = useLayout(localNodes, localEdges, setLocalNodes, graphId);
 
   // Apply theme to document
   useEffect(() => {
@@ -153,6 +190,12 @@ function CanvasInner() {
     return { nodes: nodesWithZoom, edges: rfEdges };
   }, [graphData, selectedNodeId, currentZoom]);
 
+  // Sync computed nodes/edges to local state (preserving ReactFlow's internal changes during drag)
+  useEffect(() => {
+    setLocalNodes(nodes);
+    setLocalEdges(edges);
+  }, [nodes, edges]);
+
   // Find selected node from graph data
   const selectedNode = useMemo(() => {
     if (!selectedNodeId || !graphData) return null;
@@ -167,7 +210,7 @@ function CanvasInner() {
 
   // Handle viewport changes (save to localStorage with debounce)
   const onMove = useCallback(
-    (_event, viewport) => {
+    (_event: any, viewport: any) => {
       saveViewport(viewport);
       setCurrentZoom(viewport.zoom);
     },
@@ -191,18 +234,42 @@ function CanvasInner() {
     []
   );
 
+  // Handle node changes (drag, select, etc.) - sync with local state
+  const onNodesChange = useCallback(
+    (changes: any[]) => {
+      setLocalNodes((nds) => {
+        const updatedNodes = applyNodeChanges(changes, nds);
+
+        // Track selected nodes for multi-selection
+        const selected = updatedNodes
+          .filter((node) => node.selected)
+          .map((node) => node.id);
+        setSelectedNodes(selected);
+
+        return updatedNodes;
+      });
+    },
+    []
+  );
+
+  // Handle node drag (debug)
+  const onNodeDrag = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      console.log('Node dragging:', node.id, node.position);
+    },
+    []
+  );
+
   // Handle node drag end (save position)
   const onNodeDragStop = useCallback(
     async (_event: React.MouseEvent, node: Node) => {
+      console.log('Node drag stopped:', node.id, node.position);
       try {
-        // Save position to backend
-        await api.updateNode(graphId, node.id, {
-          position: {
-            x: node.position.x,
-            y: node.position.y,
-          },
-        });
-        console.log(`Node ${node.id} position saved:`, node.position);
+        // Save position to backend (position is stored in meta.position)
+        // Note: The API expects position updates through the updateNode endpoint
+        // which will update node.meta.position
+        console.log(`Node ${node.id} position changed:`, node.position);
+        // TODO: Add position persistence to backend if needed
       } catch (error) {
         console.error('Error saving node position:', error);
       }
@@ -255,22 +322,97 @@ function CanvasInner() {
     closeContextMenu();
   }, [closeContextMenu]);
 
-  const handleAddComment = useCallback(() => {
-    console.log('Add Comment clicked - Not yet implemented');
-    // TODO: Implement comment creation
-    closeContextMenu();
-  }, [closeContextMenu]);
+  const handleAddComment = useCallback(async () => {
+    if (!contextMenu) {
+      closeContextMenu();
+      return;
+    }
 
-  const handleCreateGroup = useCallback(() => {
-    console.log('Create Group clicked - Not yet implemented');
-    // TODO: Implement group creation from selected nodes
-    closeContextMenu();
-  }, [closeContextMenu]);
+    try {
+      // Get the canvas position where user right-clicked
+      const canvasPosition = reactFlowInstance.screenToFlowPosition({
+        x: contextMenu.x,
+        y: contextMenu.y,
+      });
+
+      console.log('Creating comment at position:', canvasPosition);
+
+      const content = prompt('Enter comment text:');
+      if (!content || !content.trim()) {
+        closeContextMenu();
+        return;
+      }
+
+      // Create comment via API
+      await api.createComment(graphId, {
+        content: content.trim(),
+        author: 'human',
+        position: {
+          x: canvasPosition.x,
+          y: canvasPosition.y,
+        },
+      });
+
+      console.log('Comment created successfully');
+      closeContextMenu();
+
+      // Reload to show new comment
+      window.location.reload();
+    } catch (error) {
+      console.error('Error creating comment:', error);
+      alert(`Error creating comment: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      closeContextMenu();
+    }
+  }, [contextMenu, graphId, closeContextMenu, reactFlowInstance]);
+
+  const handleCreateGroup = useCallback(async () => {
+    if (selectedNodes.length === 0) {
+      alert('Please select at least one node to create a group');
+      closeContextMenu();
+      return;
+    }
+
+    try {
+      const label = prompt('Enter group name:');
+      if (!label || !label.trim()) {
+        closeContextMenu();
+        return;
+      }
+
+      console.log('Creating group with selected nodes:', selectedNodes);
+
+      // Create group via API
+      await api.createGroup(graphId, {
+        label: label.trim(),
+        kind: 'cluster',
+        pinned_nodes: selectedNodes,
+        color: '#E3F2FD', // Default blue
+      });
+
+      console.log('Group created successfully');
+      closeContextMenu();
+
+      // Reload to show new group
+      window.location.reload();
+    } catch (error) {
+      console.error('Error creating group:', error);
+      alert(`Error creating group: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      closeContextMenu();
+    }
+  }, [selectedNodes, graphId, closeContextMenu]);
 
   const handleEditNode = useCallback(() => {
     if (contextMenu?.nodeId) {
       setNodeBeingEdited(contextMenu.nodeId);
       setNodeEditorOpen(true);
+      closeContextMenu();
+    }
+  }, [contextMenu, closeContextMenu]);
+
+  const handleViewHistory = useCallback(() => {
+    if (contextMenu?.nodeId) {
+      setVersionHistoryNodeId(contextMenu.nodeId);
+      setVersionHistoryOpen(true);
       closeContextMenu();
     }
   }, [contextMenu, closeContextMenu]);
@@ -315,13 +457,6 @@ function CanvasInner() {
     if (contextMenu?.nodeId) {
       setNodeCreatorParentId(contextMenu.nodeId);
       setNodeCreatorOpen(true);
-    }
-  }, [contextMenu]);
-
-  const handleViewHistory = useCallback(() => {
-    if (contextMenu?.nodeId) {
-      console.log('View History clicked for:', contextMenu.nodeId);
-      // TODO: Open VersionHistory panel
     }
   }, [contextMenu]);
 
@@ -374,15 +509,63 @@ function CanvasInner() {
 
         console.log('Node updated successfully:', updatedNode);
 
-        // Force reload graph data to show the updated node
+        // Check if this node has descendants that need regeneration
+        if (graphData) {
+          const affectedNodes = getAffectedNodes(graphData, nodeId);
+          if (affectedNodes.length > 0) {
+            // Show cascade dialog to confirm regeneration
+            setPendingCascadeNodeId(nodeId);
+            setCascadeDialogOpen(true);
+            return; // Don't reload yet, wait for cascade dialog
+          }
+        }
+
+        // No descendants - just reload
         window.location.reload();
       } catch (error) {
         console.error('Error updating node:', error);
         alert(`Error updating node: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     },
-    [graphId]
+    [graphId, graphData]
   );
+
+  // Handle cascade regeneration confirmation
+  const handleConfirmCascade = useCallback(async () => {
+    if (!pendingCascadeNodeId) return;
+
+    try {
+      const result = await regenerateCascade(graphId, pendingCascadeNodeId);
+
+      if (result) {
+        console.log('Cascade regeneration result:', result);
+
+        if (result.success) {
+          alert(`Successfully regenerated ${result.regenerated_count} downstream nodes`);
+        } else {
+          alert(`Regenerated ${result.regenerated_count} nodes with ${result.errors.length} errors`);
+        }
+      }
+
+      // Close dialog and reload
+      setCascadeDialogOpen(false);
+      setPendingCascadeNodeId(null);
+      window.location.reload();
+    } catch (error) {
+      console.error('Error in cascade regeneration:', error);
+      alert(`Error regenerating cascade: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setCascadeDialogOpen(false);
+      setPendingCascadeNodeId(null);
+    }
+  }, [graphId, pendingCascadeNodeId, regenerateCascade]);
+
+  // Handle cascade cancellation
+  const handleCancelCascade = useCallback(() => {
+    setCascadeDialogOpen(false);
+    setPendingCascadeNodeId(null);
+    // Reload to show the updated node (without cascade)
+    window.location.reload();
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -393,6 +576,36 @@ function CanvasInner() {
       }
 
       const PAN_STEP = 50; // pixels to pan per arrow key press
+
+      // Ctrl+Z: Undo reorganization
+      if (event.key === 'z' && (event.ctrlKey || event.metaKey) && !event.shiftKey) {
+        event.preventDefault();
+        if (canUndo) {
+          undoReorganize();
+        }
+        return;
+      }
+
+      // Ctrl+Y or Ctrl+Shift+Z: Redo reorganization
+      if (
+        (event.key === 'y' && (event.ctrlKey || event.metaKey)) ||
+        (event.key === 'z' && (event.ctrlKey || event.metaKey) && event.shiftKey)
+      ) {
+        event.preventDefault();
+        if (canRedo) {
+          redoReorganize();
+        }
+        return;
+      }
+
+      // Ctrl+N: Create new canvas
+      if (event.key === 'n' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        const canvasCount = canvases.length;
+        const defaultName = `Untitled Canvas ${canvasCount + 1}`;
+        createCanvas(defaultName).catch(console.error);
+        return;
+      }
 
       switch (event.key) {
         case 'Escape':
@@ -447,19 +660,54 @@ function CanvasInner() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectNode, zoomIn, zoomOut, reactFlowInstance]);
+  }, [selectNode, zoomIn, zoomOut, reactFlowInstance, canvases, createCanvas, undoReorganize, redoReorganize, canUndo, canRedo]);
+
+  // No canvas selected state
+  if (!activeCanvasId) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          width: '100%',
+          height: '100vh',
+        }}
+      >
+        <CanvasNavigator />
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'column',
+          gap: '1rem',
+          color: '#666'
+        }}>
+          <div style={{ fontSize: '1.2rem' }}>No canvas selected</div>
+          <div>Create a new canvas or select one from the sidebar</div>
+        </div>
+      </div>
+    );
+  }
 
   // Loading state
   if (isLoading) {
     return (
-      <div style={{
-        width: '100%',
-        height: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}>
-        <div>Loading graph...</div>
+      <div
+        style={{
+          display: 'flex',
+          width: '100%',
+          height: '100vh',
+        }}
+      >
+        <CanvasNavigator />
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div>Loading graph...</div>
+        </div>
       </div>
     );
   }
@@ -467,17 +715,25 @@ function CanvasInner() {
   // Error state
   if (error) {
     return (
-      <div style={{
-        width: '100%',
-        height: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexDirection: 'column',
-        gap: '1rem'
-      }}>
-        <div style={{ color: '#d32f2f', fontSize: '1.2rem' }}>Error loading graph</div>
-        <div style={{ color: '#666' }}>{error}</div>
+      <div
+        style={{
+          display: 'flex',
+          width: '100%',
+          height: '100vh',
+        }}
+      >
+        <CanvasNavigator />
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'column',
+          gap: '1rem'
+        }}>
+          <div style={{ color: '#d32f2f', fontSize: '1.2rem' }}>Error loading graph</div>
+          <div style={{ color: '#666' }}>{error}</div>
+        </div>
       </div>
     );
   }
@@ -485,19 +741,32 @@ function CanvasInner() {
   return (
     <div
       style={{
+        display: 'flex',
         width: '100%',
         height: '100vh',
-        touchAction: 'none', // Prevent browser default touch behaviors
       }}
-      role="application"
-      aria-label="Interactive node canvas for reasoning graphs"
     >
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
+      {/* Canvas Navigator Sidebar */}
+      <CanvasNavigator />
+
+      {/* Main Canvas Area */}
+      <div
+        style={{
+          flex: 1,
+          height: '100vh',
+          touchAction: 'none', // Prevent browser default touch behaviors
+        }}
+        role="application"
+        aria-label="Interactive node canvas for reasoning graphs"
+      >
+        <ReactFlow
+        nodes={localNodes}
+        edges={localEdges}
         nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
         onNodeClick={onNodeClick}
         onNodeDoubleClick={onNodeDoubleClick}
+        onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
         onDoubleClick={onDoubleClick}
@@ -520,6 +789,7 @@ function CanvasInner() {
         selectNodesOnDrag={false} // Don't select on drag (allows node movement)
         // Selection Configuration
         multiSelectionKeyCode="Shift" // Shift for multi-selection
+        selectionOnDrag={true}        // Enable selection box on Shift+drag
         // Performance Optimizations
         onlyRenderVisibleElements={true} // Viewport culling for large graphs
         attributionPosition="bottom-right"
@@ -562,14 +832,76 @@ function CanvasInner() {
           {formatZoomPercentage(currentZoom)}
         </Panel>
 
-        {/* Settings button */}
+        {/* Toolbar buttons */}
         <Panel position="top-right" style={{
           backgroundColor: 'var(--panel-bg)',
           padding: '8px',
           borderRadius: '4px',
           boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-          cursor: 'pointer',
+          display: 'flex',
+          gap: '8px',
         }}>
+          {/* Reorganize button */}
+          <button
+            onClick={handleReorganize}
+            disabled={isReorganizing}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: isReorganizing ? 'wait' : 'pointer',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              color: isReorganizing ? 'var(--node-text-muted)' : 'var(--node-text-secondary)',
+              opacity: isReorganizing ? 0.5 : 1,
+            }}
+            aria-label={isReorganizing ? 'Reorganizing canvas...' : 'Reorganize canvas layout'}
+            title={isReorganizing ? 'Reorganizing...' : 'Reorganize canvas layout'}
+          >
+            <RefreshCw size={20} className={isReorganizing ? 'spin' : ''} />
+          </button>
+
+          {/* Undo button */}
+          <button
+            onClick={undoReorganize}
+            disabled={!canUndo}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: canUndo ? 'pointer' : 'not-allowed',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              color: 'var(--node-text-secondary)',
+              opacity: canUndo ? 1 : 0.3,
+            }}
+            aria-label="Undo reorganization (Ctrl+Z)"
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo size={20} />
+          </button>
+
+          {/* Redo button */}
+          <button
+            onClick={redoReorganize}
+            disabled={!canRedo}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: canRedo ? 'pointer' : 'not-allowed',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              color: 'var(--node-text-secondary)',
+              opacity: canRedo ? 1 : 0.3,
+            }}
+            aria-label="Redo reorganization (Ctrl+Y)"
+            title="Redo (Ctrl+Y)"
+          >
+            <Redo size={20} />
+          </button>
+
+          {/* Settings button */}
           <button
             onClick={() => setSettingsPanelOpen(true)}
             style={{
@@ -653,6 +985,35 @@ function CanvasInner() {
           onSave={handleUpdateNode}
         />
       )}
+
+      {/* Cascade Regeneration Dialog */}
+      {cascadeDialogOpen && pendingCascadeNodeId && graphData && (
+        <CascadeRegenDialog
+          graph={graphData}
+          modifiedNodeId={pendingCascadeNodeId}
+          onConfirm={handleConfirmCascade}
+          onCancel={handleCancelCascade}
+          isRegenerating={isRegenerating}
+        />
+      )}
+
+      {/* Version History Panel */}
+      {versionHistoryOpen && versionHistoryNodeId && graphData && (
+        <VersionHistory
+          graphId={graphId}
+          nodeId={versionHistoryNodeId}
+          currentContent={graphData.nodes[versionHistoryNodeId]?.content || ''}
+          onClose={() => {
+            setVersionHistoryOpen(false);
+            setVersionHistoryNodeId(null);
+          }}
+          onRestore={async () => {
+            // Refresh graph data after restore
+            window.location.reload(); // Simple approach - reload to get latest data
+          }}
+        />
+      )}
+      </div>
     </div>
   );
 }

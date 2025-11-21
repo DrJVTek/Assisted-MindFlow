@@ -3,11 +3,17 @@
 import logging
 from fastapi import APIRouter, HTTPException, Query
 from uuid import UUID, uuid4
-from typing import Dict
+from typing import Dict, List
 from pydantic import BaseModel, Field
 
 from mindflow.models.graph import Graph
 from mindflow.models.node import Node, NodeType, NodeAuthor, NodeStatus, NodeMetadata, Position
+from mindflow.models.group import Group, GroupKind, GroupMetadata
+from mindflow.models.comment import Comment, CommentTarget
+from mindflow.models.node_version import NodeVersion, TriggerReason
+from mindflow.utils.cascade import get_affected_nodes
+from mindflow.services.llm_service import LLMService
+from mindflow.services.version_storage import get_version_storage
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,6 +23,46 @@ router = APIRouter(prefix="/graphs", tags=["graphs"])
 
 # Temporary in-memory storage for development
 _graphs_storage: Dict[str, Graph] = {}
+
+
+# Helper functions for canvas integration
+def add_graph_to_storage(graph: Graph) -> None:
+    """Add a graph to in-memory storage.
+
+    Args:
+        graph: Graph instance to store
+    """
+    _graphs_storage[str(graph.id)] = graph
+    logger.info(f"Added graph {graph.id} to storage")
+
+
+def get_graph_from_storage(graph_id: UUID) -> Graph | None:
+    """Get a graph from in-memory storage.
+
+    Args:
+        graph_id: UUID of graph to retrieve
+
+    Returns:
+        Graph instance if found, None otherwise
+    """
+    return _graphs_storage.get(str(graph_id))
+
+
+def delete_graph_from_storage(graph_id: UUID) -> bool:
+    """Delete a graph from in-memory storage.
+
+    Args:
+        graph_id: UUID of graph to delete
+
+    Returns:
+        True if deleted, False if not found
+    """
+    graph_id_str = str(graph_id)
+    if graph_id_str in _graphs_storage:
+        del _graphs_storage[graph_id_str]
+        logger.info(f"Deleted graph {graph_id} from storage")
+        return True
+    return False
 
 
 # Request/Response Models
@@ -243,6 +289,16 @@ async def update_node(
     graph.meta.updated_at = node.meta.updated_at
 
     logger.info(f"Updated node {node_id}")
+
+    # Create version after successful update
+    version_storage = get_version_storage()
+    version_storage.create_version(
+        node_id=node_uuid,
+        content=node.content,
+        trigger_reason="manual_edit",
+        llm_metadata=None,
+    )
+
     return node
 
 
@@ -303,4 +359,722 @@ async def delete_node(graph_id: str, node_id: str) -> None:
     graph.meta.updated_at = datetime.now(UTC)
 
     logger.info(f"Deleted node {node_id} from graph {graph_id}")
+
+    # Mark versions as deleted (soft delete - keep for recovery)
+    version_storage = get_version_storage()
+    version_storage.delete_node_versions(node_uuid)
+
+    return None
+
+
+# ============================================================================
+# VERSION HISTORY ENDPOINTS
+# ============================================================================
+
+
+@router.get("/{graph_id}/nodes/{node_id}/versions")
+async def get_node_versions(graph_id: str, node_id: str) -> List[NodeVersion]:
+    """Get all versions for a node.
+
+    Args:
+        graph_id: UUID of the graph
+        node_id: UUID of the node
+
+    Returns:
+        List of NodeVersion objects sorted by version_number (newest first)
+
+    Raises:
+        HTTPException: 404 if graph or node not found
+    """
+    logger.info(f"GET /api/graphs/{graph_id}/nodes/{node_id}/versions")
+
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    try:
+        node_uuid = UUID(node_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid UUID format: {node_id}")
+
+    if node_uuid not in graph.nodes:
+        raise HTTPException(
+            status_code=404, detail=f"Node with ID {node_id} not found in graph"
+        )
+
+    # Get versions from storage
+    version_storage = get_version_storage()
+    versions = version_storage.get_versions(node_uuid)
+
+    # Return newest first
+    versions.reverse()
+
+    logger.info(f"Retrieved {len(versions)} versions for node {node_id}")
+    return versions
+
+
+class RestoreVersionRequest(BaseModel):
+    """Request body for restoring a previous version."""
+    pass  # No additional parameters needed
+
+
+@router.post("/{graph_id}/nodes/{node_id}/versions/{version_id}/restore")
+async def restore_node_version(
+    graph_id: str, node_id: str, version_id: str, request: RestoreVersionRequest = RestoreVersionRequest()
+) -> Node:
+    """Restore a previous version of a node.
+
+    This creates a NEW version with the content from the specified version.
+    It does not delete or modify existing versions.
+
+    Args:
+        graph_id: UUID of the graph
+        node_id: UUID of the node
+        version_id: UUID of the version to restore
+        request: Restore request (empty body)
+
+    Returns:
+        Updated Node object with restored content
+
+    Raises:
+        HTTPException: 404 if graph, node, or version not found
+    """
+    logger.info(
+        f"POST /api/graphs/{graph_id}/nodes/{node_id}/versions/{version_id}/restore"
+    )
+
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    try:
+        node_uuid = UUID(node_id)
+        version_uuid = UUID(version_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid UUID format"
+        )
+
+    if node_uuid not in graph.nodes:
+        raise HTTPException(
+            status_code=404, detail=f"Node with ID {node_id} not found in graph"
+        )
+
+    # Get the version to restore
+    version_storage = get_version_storage()
+    version_to_restore = version_storage.get_version_by_id(version_uuid)
+
+    if version_to_restore is None:
+        raise HTTPException(
+            status_code=404, detail=f"Version with ID {version_id} not found"
+        )
+
+    if version_to_restore.node_id != node_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Version {version_id} does not belong to node {node_id}",
+        )
+
+    # Update node content with restored version
+    node = graph.nodes[node_uuid]
+    node.content = version_to_restore.content
+    node.update_timestamp()
+    graph.meta.updated_at = node.meta.updated_at
+
+    # Create a new version to record the rollback
+    version_storage.create_version(
+        node_id=node_uuid,
+        content=node.content,
+        trigger_reason="rollback",
+        llm_metadata={
+            "restored_from_version": version_to_restore.version_number,
+            "restored_version_id": str(version_to_restore.version_id),
+        },
+    )
+
+    logger.info(
+        f"Restored node {node_id} to version {version_to_restore.version_number}"
+    )
+    return node
+
+
+class RegenerateCascadeRequest(BaseModel):
+    """Request body for cascade regeneration."""
+    modified_node_id: str = Field(description="UUID of the node that was modified")
+    llm_provider: str = Field(default="mock", description="LLM provider to use (mock, openai, anthropic, etc.)")
+    llm_model: str = Field(default="mock-model", description="LLM model to use")
+
+
+class RegenerateCascadeResponse(BaseModel):
+    """Response for cascade regeneration."""
+    success: bool
+    affected_nodes: List[str]
+    regenerated_count: int
+    errors: List[Dict[str, str]] = Field(default_factory=list)
+    message: str
+
+
+# Group Request/Response Models
+class CreateGroupRequest(BaseModel):
+    """Request body for creating a new group."""
+    label: str = Field(min_length=1, max_length=100)
+    kind: GroupKind = "cluster"
+    color: str | None = None
+    pinned_nodes: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    parent_group: str | None = None
+
+
+class UpdateGroupRequest(BaseModel):
+    """Request body for updating a group."""
+    label: str | None = Field(None, min_length=1, max_length=100)
+    color: str | None = None
+    pinned_nodes: list[str] | None = None
+    tags: list[str] | None = None
+
+
+# Comment Request/Response Models
+class CreateCommentRequest(BaseModel):
+    """Request body for creating a new comment."""
+    content: str = Field(min_length=1, max_length=5000)
+    author: NodeAuthor = "human"
+    node_id: str | None = None
+    edge: tuple[str, str] | None = None
+    position: Position | None = None
+
+
+class UpdateCommentRequest(BaseModel):
+    """Request body for updating a comment."""
+    content: str = Field(min_length=1, max_length=5000)
+
+
+@router.post("/{graph_id}/regenerate-cascade")
+async def regenerate_cascade(
+    graph_id: str, request: RegenerateCascadeRequest
+) -> RegenerateCascadeResponse:
+    """Regenerate all nodes downstream from a modified node.
+
+    This endpoint implements the cascade regeneration algorithm:
+    1. Find all descendants of the modified node
+    2. Sort them topologically (parents before children)
+    3. For each node, regenerate content using LLM based on parent nodes
+    4. Update node content and timestamp
+
+    Args:
+        graph_id: UUID of the graph
+        request: Cascade regeneration request with modified_node_id and LLM config
+
+    Returns:
+        Response with success status, affected nodes, and any errors
+
+    Raises:
+        HTTPException: 404 if graph or node not found, 400 for validation errors
+    """
+    logger.info(f"POST /api/graphs/{graph_id}/regenerate-cascade - node={request.modified_node_id}")
+
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    # Validate modified node ID
+    try:
+        modified_node_uuid = UUID(request.modified_node_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid UUID format: {request.modified_node_id}"
+        )
+
+    if modified_node_uuid not in graph.nodes:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Modified node {request.modified_node_id} not found in graph",
+        )
+
+    # Get affected nodes in topological order
+    try:
+        affected_node_ids = get_affected_nodes(graph, modified_node_uuid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Error computing cascade: {str(e)}")
+
+    if not affected_node_ids:
+        logger.info(f"No descendants found for node {request.modified_node_id}")
+        return RegenerateCascadeResponse(
+            success=True,
+            affected_nodes=[],
+            regenerated_count=0,
+            message="No downstream nodes to regenerate",
+        )
+
+    logger.info(
+        f"Found {len(affected_node_ids)} nodes to regenerate in cascade order"
+    )
+
+    # Initialize LLM service
+    llm_service = LLMService(provider=request.llm_provider, model=request.llm_model)
+
+    # Regenerate each node in order
+    regenerated_count = 0
+    errors = []
+
+    for node_uuid in affected_node_ids:
+        try:
+            node = graph.nodes[node_uuid]
+
+            # Get parent nodes for context
+            parent_nodes = [
+                graph.nodes[parent_uuid]
+                for parent_uuid in node.parents
+                if parent_uuid in graph.nodes
+            ]
+
+            # Store previous content
+            previous_content = node.content
+
+            # Generate new content using LLM
+            new_content = llm_service.generate_node_content(
+                node_type=node.type,
+                parent_nodes=parent_nodes,
+                previous_content=previous_content,
+            )
+
+            # Update node
+            node.content = new_content
+            node.update_timestamp()
+
+            # Create version for cascade regeneration
+            version_storage = get_version_storage()
+            version_storage.create_version(
+                node_id=node_uuid,
+                content=new_content,
+                trigger_reason="parent_cascade",
+                llm_metadata={
+                    "provider": request.llm_provider,
+                    "model": request.llm_model,
+                    "previous_content": previous_content,
+                },
+            )
+
+            regenerated_count += 1
+            logger.info(f"Regenerated node {node_uuid} ({node.type})")
+
+        except Exception as e:
+            error_msg = f"Error regenerating node {node_uuid}: {str(e)}"
+            logger.error(error_msg)
+            errors.append({"node_id": str(node_uuid), "error": str(e)})
+
+    # Update graph timestamp
+    from datetime import UTC, datetime
+    graph.meta.updated_at = datetime.now(UTC)
+
+    success = regenerated_count > 0 and len(errors) == 0
+    message = (
+        f"Successfully regenerated {regenerated_count} nodes"
+        if success
+        else f"Regenerated {regenerated_count} nodes with {len(errors)} errors"
+    )
+
+    logger.info(
+        f"Cascade regeneration complete: {regenerated_count} nodes, {len(errors)} errors"
+    )
+
+    return RegenerateCascadeResponse(
+        success=success,
+        affected_nodes=[str(nid) for nid in affected_node_ids],
+        regenerated_count=regenerated_count,
+        errors=errors,
+        message=message,
+    )
+
+
+# ============================================================================
+# GROUP ENDPOINTS
+# ============================================================================
+
+@router.post("/{graph_id}/groups", status_code=201)
+async def create_group(graph_id: str, group_req: CreateGroupRequest) -> Group:
+    """Create a new group in the graph.
+
+    Args:
+        graph_id: UUID of the graph
+        group_req: Group creation request body
+
+    Returns:
+        Created Group object
+
+    Raises:
+        HTTPException: 404 if graph not found, 400 if validation fails
+    """
+    logger.info(f"POST /api/graphs/{graph_id}/groups - label={group_req.label}")
+
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    # Validate parent group if specified
+    parent_group_uuid = None
+    if group_req.parent_group:
+        try:
+            parent_group_uuid = UUID(group_req.parent_group)
+            if parent_group_uuid not in graph.groups:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Parent group {group_req.parent_group} not found in graph",
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid UUID format: {group_req.parent_group}"
+            )
+
+    # Validate pinned nodes
+    pinned_node_uuids = []
+    for node_id_str in group_req.pinned_nodes:
+        try:
+            node_uuid = UUID(node_id_str)
+            if node_uuid not in graph.nodes:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Pinned node {node_id_str} not found in graph",
+                )
+            pinned_node_uuids.append(node_uuid)
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid UUID format: {node_id_str}"
+            )
+
+    # Create group metadata
+    metadata = GroupMetadata(
+        color=group_req.color,
+        pinned_nodes=pinned_node_uuids,
+        tags=group_req.tags,
+    )
+
+    # Create the group
+    new_group = Group(
+        label=group_req.label,
+        kind=group_req.kind,
+        parent_group=parent_group_uuid,
+        meta=metadata,
+    )
+
+    # Add group to graph
+    graph.groups[new_group.id] = new_group
+
+    # Update graph timestamp
+    from datetime import UTC, datetime
+    graph.meta.updated_at = datetime.now(UTC)
+
+    logger.info(f"Created group {new_group.id} with label '{new_group.label}'")
+    return new_group
+
+
+@router.put("/{graph_id}/groups/{group_id}")
+async def update_group(
+    graph_id: str, group_id: str, update_req: UpdateGroupRequest
+) -> Group:
+    """Update an existing group.
+
+    Args:
+        graph_id: UUID of the graph
+        group_id: UUID of the group to update
+        update_req: Group update request body
+
+    Returns:
+        Updated Group object
+
+    Raises:
+        HTTPException: 404 if graph or group not found
+    """
+    logger.info(f"PUT /api/graphs/{graph_id}/groups/{group_id}")
+
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    try:
+        group_uuid = UUID(group_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid UUID format: {group_id}")
+
+    if group_uuid not in graph.groups:
+        raise HTTPException(
+            status_code=404, detail=f"Group with ID {group_id} not found in graph"
+        )
+
+    group = graph.groups[group_uuid]
+
+    # Update fields if provided
+    if update_req.label is not None:
+        group.label = update_req.label
+    if update_req.color is not None:
+        group.meta.color = update_req.color
+    if update_req.pinned_nodes is not None:
+        # Validate pinned nodes
+        pinned_node_uuids = []
+        for node_id_str in update_req.pinned_nodes:
+            try:
+                node_uuid = UUID(node_id_str)
+                if node_uuid not in graph.nodes:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Pinned node {node_id_str} not found in graph",
+                    )
+                pinned_node_uuids.append(node_uuid)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid UUID format: {node_id_str}"
+                )
+        group.meta.pinned_nodes = pinned_node_uuids
+    if update_req.tags is not None:
+        group.meta.tags = update_req.tags
+
+    # Update graph timestamp
+    from datetime import UTC, datetime
+    graph.meta.updated_at = datetime.now(UTC)
+
+    logger.info(f"Updated group {group_id}")
+    return group
+
+
+@router.delete("/{graph_id}/groups/{group_id}", status_code=204)
+async def delete_group(graph_id: str, group_id: str) -> None:
+    """Delete a group from the graph.
+
+    Args:
+        graph_id: UUID of the graph
+        group_id: UUID of the group to delete
+
+    Raises:
+        HTTPException: 404 if graph or group not found
+    """
+    logger.info(f"DELETE /api/graphs/{graph_id}/groups/{group_id}")
+
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    try:
+        group_uuid = UUID(group_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid UUID format: {group_id}")
+
+    if group_uuid not in graph.groups:
+        raise HTTPException(
+            status_code=404, detail=f"Group with ID {group_id} not found in graph"
+        )
+
+    # Remove group from nodes' groups lists
+    for node in graph.nodes.values():
+        if group_uuid in node.groups:
+            node.groups.remove(group_uuid)
+
+    # Remove group from graph
+    del graph.groups[group_uuid]
+
+    # Update graph timestamp
+    from datetime import UTC, datetime
+    graph.meta.updated_at = datetime.now(UTC)
+
+    logger.info(f"Deleted group {group_id} from graph {graph_id}")
+    return None
+
+
+# ============================================================================
+# COMMENT ENDPOINTS
+# ============================================================================
+
+@router.post("/{graph_id}/comments", status_code=201)
+async def create_comment(graph_id: str, comment_req: CreateCommentRequest) -> Comment:
+    """Create a new comment in the graph.
+
+    Args:
+        graph_id: UUID of the graph
+        comment_req: Comment creation request body
+
+    Returns:
+        Created Comment object
+
+    Raises:
+        HTTPException: 404 if graph not found, 400 if validation fails
+    """
+    logger.info(f"POST /api/graphs/{graph_id}/comments - author={comment_req.author}")
+
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    # Validate that either node_id or edge is provided (not both)
+    if comment_req.node_id and comment_req.edge:
+        raise HTTPException(
+            status_code=400,
+            detail="Comment cannot be attached to both a node and an edge",
+        )
+
+    if not comment_req.node_id and not comment_req.edge and not comment_req.position:
+        raise HTTPException(
+            status_code=400,
+            detail="Comment must be attached to a node, edge, or have a position (for floating comments)",
+        )
+
+    # Build attached_to based on request
+    attached_to: CommentTarget = {}
+
+    if comment_req.node_id:
+        try:
+            node_uuid = UUID(comment_req.node_id)
+            if node_uuid not in graph.nodes:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Node {comment_req.node_id} not found in graph",
+                )
+            attached_to["node"] = node_uuid
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid UUID format: {comment_req.node_id}"
+            )
+
+    if comment_req.edge:
+        try:
+            parent_uuid = UUID(comment_req.edge[0])
+            child_uuid = UUID(comment_req.edge[1])
+            if parent_uuid not in graph.nodes or child_uuid not in graph.nodes:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Edge nodes not found in graph",
+                )
+            attached_to["edge"] = (parent_uuid, child_uuid)
+        except (ValueError, IndexError):
+            raise HTTPException(
+                status_code=400, detail=f"Invalid edge format: {comment_req.edge}"
+            )
+
+    # Create the comment
+    new_comment = Comment(
+        author=comment_req.author,
+        content=comment_req.content,
+        attached_to=attached_to,
+    )
+
+    # Add comment to graph
+    graph.comments[new_comment.id] = new_comment
+
+    # Update graph timestamp
+    from datetime import UTC, datetime
+    graph.meta.updated_at = datetime.now(UTC)
+
+    logger.info(f"Created comment {new_comment.id}")
+    return new_comment
+
+
+@router.put("/{graph_id}/comments/{comment_id}")
+async def update_comment(
+    graph_id: str, comment_id: str, update_req: UpdateCommentRequest
+) -> Comment:
+    """Update an existing comment.
+
+    Args:
+        graph_id: UUID of the graph
+        comment_id: UUID of the comment to update
+        update_req: Comment update request body
+
+    Returns:
+        Updated Comment object
+
+    Raises:
+        HTTPException: 404 if graph or comment not found
+    """
+    logger.info(f"PUT /api/graphs/{graph_id}/comments/{comment_id}")
+
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    try:
+        comment_uuid = UUID(comment_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid UUID format: {comment_id}"
+        )
+
+    if comment_uuid not in graph.comments:
+        raise HTTPException(
+            status_code=404, detail=f"Comment with ID {comment_id} not found in graph"
+        )
+
+    comment = graph.comments[comment_uuid]
+
+    # Update content
+    comment.content = update_req.content
+
+    # Update graph timestamp
+    from datetime import UTC, datetime
+    graph.meta.updated_at = datetime.now(UTC)
+
+    logger.info(f"Updated comment {comment_id}")
+    return comment
+
+
+@router.delete("/{graph_id}/comments/{comment_id}", status_code=204)
+async def delete_comment(graph_id: str, comment_id: str) -> None:
+    """Delete a comment from the graph.
+
+    Args:
+        graph_id: UUID of the graph
+        comment_id: UUID of the comment to delete
+
+    Raises:
+        HTTPException: 404 if graph or comment not found
+    """
+    logger.info(f"DELETE /api/graphs/{graph_id}/comments/{comment_id}")
+
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    try:
+        comment_uuid = UUID(comment_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid UUID format: {comment_id}"
+        )
+
+    if comment_uuid not in graph.comments:
+        raise HTTPException(
+            status_code=404, detail=f"Comment with ID {comment_id} not found in graph"
+        )
+
+    # Remove comment from graph
+    del graph.comments[comment_uuid]
+
+    # Update graph timestamp
+    from datetime import UTC, datetime
+    graph.meta.updated_at = datetime.now(UTC)
+
+    logger.info(f"Deleted comment {comment_id} from graph {graph_id}")
     return None

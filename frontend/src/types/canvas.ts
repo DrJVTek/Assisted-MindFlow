@@ -5,6 +5,49 @@
 import type { UUID, NodeType, NodeAuthor, NodeStatus } from './graph';
 
 /**
+ * Canvas entity representing a named workspace
+ */
+export interface Canvas {
+  id: UUID;
+  name: string;
+  description: string | null;
+  graph_id: UUID;
+  created_at: string; // ISO 8601 datetime
+  updated_at: string; // ISO 8601 datetime
+  last_opened: string; // ISO 8601 datetime
+  thumbnail: string | null; // Base64-encoded image
+  is_subgraph: boolean;
+  owner_id: string | null;
+}
+
+/**
+ * Request body for creating a canvas
+ */
+export interface CreateCanvasRequest {
+  name: string;
+  description?: string;
+  owner_id?: string;
+}
+
+/**
+ * Request body for updating a canvas
+ */
+export interface UpdateCanvasRequest {
+  name?: string;
+  description?: string;
+}
+
+/**
+ * Response from canvas list endpoint
+ */
+export interface CanvasListResponse {
+  canvases: Canvas[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
  * Canvas viewport state
  */
 export interface CanvasViewport {

@@ -89,3 +89,15 @@ export interface Graph {
   groups: Record<UUID, Group>;
   comments: Record<UUID, Comment>;
 }
+
+export type TriggerReason = 'manual_edit' | 'parent_cascade' | 'user_regen' | 'rollback';
+
+export interface NodeVersion {
+  version_id: UUID;
+  node_id: UUID;
+  version_number: number;
+  content: string;
+  created_at: string; // ISO 8601 datetime
+  trigger_reason: TriggerReason;
+  llm_metadata?: Record<string, any> | null;
+}

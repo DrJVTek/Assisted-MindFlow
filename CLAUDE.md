@@ -151,6 +151,37 @@ Assisted MindFlow/
 - Always pull before pushing
 - Never force push to main/master
 
+## Development Scripts
+
+### Server Management
+
+**Restart Servers**: Use `restart.bat` (Windows) or `./restart.sh` (Linux) to kill and relaunch both backend and frontend servers
+- Automatically kills all existing Python (uvicorn) and Node (vite) processes
+- Waits for ports to be released
+- Starts backend on port 8000
+- Starts frontend on port 5173
+- Provides clear status output
+
+**Usage**:
+```bash
+# Windows
+restart.bat
+
+# Linux/Mac
+./restart.sh
+```
+
+**When to Use**:
+- After making configuration changes
+- When servers become unresponsive
+- After dependency updates
+- When port conflicts occur
+- For clean development environment reset
+
+**Individual Server Scripts**:
+- Backend only: `run-backend.bat` or `./run-backend.sh`
+- Frontend only: `run-frontend.bat` or `./run-frontend.sh`
+
 ## Notes
 
 When implementing features:

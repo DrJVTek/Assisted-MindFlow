@@ -19,7 +19,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { UUID } from '../types/graph';
+import { UUID } from '../types/uuid';
 import { useLLMOperationsStore } from '../stores/llmOperationsStore';
 import { StreamingIndicator } from './StreamingIndicator';
 

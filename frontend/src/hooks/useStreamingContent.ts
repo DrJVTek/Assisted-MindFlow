@@ -24,7 +24,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { UUID } from '../types/graph';
+import { UUID } from '../types/uuid';
 import { useLLMOperationsStore, OperationStatus } from '../stores/llmOperationsStore';
 import { useStreamingContentStore } from '../stores/streamingContentStore';
 

@@ -2,7 +2,8 @@
  * TypeScript types for MindFlow Graph entities (based on Python backend models)
  */
 
-export type UUID = string;
+// Re-export UUID from dedicated file
+export type { UUID } from './uuid';
 
 export type NodeType =
   | 'question'

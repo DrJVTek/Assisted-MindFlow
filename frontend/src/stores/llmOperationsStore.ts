@@ -23,7 +23,9 @@
  */
 
 import { create } from 'zustand';
-import { UUID } from '../types/graph';
+
+// UUID type (string alias) - defined locally to avoid import issues
+type UUID = string;
 
 /**
  * LLM operation status enum (matches backend NodeState)

@@ -7,7 +7,7 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { Plus, Settings, Edit2, Trash2, GitBranch, History, MessageSquare, Layers } from 'lucide-react';
+import { Plus, Settings, Edit2, Trash2, GitBranch, History, MessageSquare, Layers, Bot } from 'lucide-react';
 
 export type ContextMenuType = 'canvas' | 'node' | 'group';
 
@@ -31,6 +31,7 @@ interface ContextMenuProps {
   onEdit?: () => void;
   onDelete?: () => void;
   onAddChild?: () => void;
+  onAskLLM?: () => void;
   onViewHistory?: () => void;
   onSettings?: () => void;
 }
@@ -46,6 +47,7 @@ export function ContextMenu({
   onEdit,
   onDelete,
   onAddChild,
+  onAskLLM,
   onViewHistory,
   onSettings,
 }: ContextMenuProps) {
@@ -153,6 +155,19 @@ export function ContextMenu({
           onAddChild();
           onClose();
         },
+      });
+    }
+
+    if (onAskLLM) {
+      actions.push({
+        id: 'ask-llm',
+        label: 'Ask LLM',
+        icon: <Bot size={16} />,
+        onClick: () => {
+          onAskLLM();
+          onClose();
+        },
+        dividerAfter: true,
       });
     }
 

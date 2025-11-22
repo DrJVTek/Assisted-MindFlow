@@ -39,10 +39,10 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T005 Create MarkdownRenderer component in frontend/src/components/MarkdownRenderer.tsx (XSS-safe rendering with react-markdown, remarkGfm, rehypeHighlight)
-- [ ] T006 Unit test for MarkdownRenderer in frontend/tests/unit/MarkdownRenderer.test.tsx (test markdown rendering and XSS sanitization)
-- [ ] T007 Update node CRUD schema validation in backend/src/api/nodes.py to accept new optional fields
-- [ ] T008 Unit test for Node model persistence in backend/tests/unit/test_node_model.py (verify new fields persist and validate correctly)
+- [X] T005 Create MarkdownRenderer component in frontend/src/components/MarkdownRenderer.tsx (XSS-safe rendering with react-markdown, remarkGfm, rehypeHighlight)
+- [X] T006 Unit test for MarkdownRenderer in frontend/tests/unit/MarkdownRenderer.test.tsx (test markdown rendering and XSS sanitization)
+- [X] T007 Update node CRUD schema validation in src/mindflow/api/routes/graphs.py to accept new optional fields
+- [X] T008 Unit test for Node model persistence in tests/unit/test_node_model.py (verify new fields persist and validate correctly)
 
 **Checkpoint**: Foundation ready - markdown renderer tested, schema validated, user story implementation can begin in parallel
 

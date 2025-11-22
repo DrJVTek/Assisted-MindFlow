@@ -337,3 +337,309 @@ class TestNode:
         assert restored.children == original.children
         assert restored.groups == original.groups
         assert restored.meta.importance == original.meta.importance
+
+
+class TestNodeFeature009Extensions:
+    """Tests for Feature 009: Inline LLM Response Display node extensions."""
+
+    def test_node_llm_response_field(self) -> None:
+        """Test llm_response field persists correctly."""
+        response = "# Test Response\n\nThis is **markdown** content."
+        node = Node(
+            type="question",
+            author="human",
+            content="Test question",
+            llm_response=response
+        )
+
+        assert node.llm_response == response
+
+    def test_node_llm_response_defaults_to_none(self) -> None:
+        """Test llm_response defaults to None when not provided."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test"
+        )
+
+        assert node.llm_response is None
+
+    def test_node_llm_operation_id_field(self) -> None:
+        """Test llm_operation_id field persists correctly."""
+        op_id = uuid4()
+        node = Node(
+            type="question",
+            author="human",
+            content="Test",
+            llm_operation_id=op_id
+        )
+
+        assert node.llm_operation_id == op_id
+
+    def test_node_llm_operation_id_defaults_to_none(self) -> None:
+        """Test llm_operation_id defaults to None when not provided."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test"
+        )
+
+        assert node.llm_operation_id is None
+
+    def test_font_size_default(self) -> None:
+        """Test font_size defaults to 14."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test"
+        )
+
+        assert node.font_size == 14
+
+    def test_font_size_validation_min(self) -> None:
+        """Test font_size min boundary (10px)."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test",
+            font_size=10
+        )
+
+        assert node.font_size == 10
+
+    def test_font_size_validation_max(self) -> None:
+        """Test font_size max boundary (24px)."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test",
+            font_size=24
+        )
+
+        assert node.font_size == 24
+
+    def test_font_size_below_min_fails(self) -> None:
+        """Test font_size below 10 raises ValidationError."""
+        with pytest.raises(ValidationError):
+            Node(
+                type="question",
+                author="human",
+                content="Test",
+                font_size=9
+            )
+
+    def test_font_size_above_max_fails(self) -> None:
+        """Test font_size above 24 raises ValidationError."""
+        with pytest.raises(ValidationError):
+            Node(
+                type="question",
+                author="human",
+                content="Test",
+                font_size=25
+            )
+
+    def test_node_width_default(self) -> None:
+        """Test node_width defaults to 400px."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test"
+        )
+
+        assert node.node_width == 400
+
+    def test_node_width_validation_min(self) -> None:
+        """Test node_width min boundary (280px)."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test",
+            node_width=280
+        )
+
+        assert node.node_width == 280
+
+    def test_node_width_validation_max(self) -> None:
+        """Test node_width max boundary (800px)."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test",
+            node_width=800
+        )
+
+        assert node.node_width == 800
+
+    def test_node_width_below_min_fails(self) -> None:
+        """Test node_width below 280 raises ValidationError."""
+        with pytest.raises(ValidationError):
+            Node(
+                type="question",
+                author="human",
+                content="Test",
+                node_width=279
+            )
+
+    def test_node_width_above_max_fails(self) -> None:
+        """Test node_width above 800 raises ValidationError."""
+        with pytest.raises(ValidationError):
+            Node(
+                type="question",
+                author="human",
+                content="Test",
+                node_width=801
+            )
+
+    def test_node_height_default(self) -> None:
+        """Test node_height defaults to 400px."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test"
+        )
+
+        assert node.node_height == 400
+
+    def test_node_height_validation_min(self) -> None:
+        """Test node_height min boundary (200px)."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test",
+            node_height=200
+        )
+
+        assert node.node_height == 200
+
+    def test_node_height_validation_max(self) -> None:
+        """Test node_height max boundary (1200px)."""
+        node = Node(
+            type="question",
+            author="human",
+            content="Test",
+            node_height=1200
+        )
+
+        assert node.node_height == 1200
+
+    def test_node_height_below_min_fails(self) -> None:
+        """Test node_height below 200 raises ValidationError."""
+        with pytest.raises(ValidationError):
+            Node(
+                type="question",
+                author="human",
+                content="Test",
+                node_height=199
+            )
+
+    def test_node_height_above_max_fails(self) -> None:
+        """Test node_height above 1200 raises ValidationError."""
+        with pytest.raises(ValidationError):
+            Node(
+                type="question",
+                author="human",
+                content="Test",
+                node_height=1201
+            )
+
+    def test_llm_response_max_length_valid(self) -> None:
+        """Test llm_response accepts up to 100k characters."""
+        max_response = "A" * 100000
+        node = Node(
+            type="question",
+            author="human",
+            content="Test",
+            llm_response=max_response
+        )
+
+        assert len(node.llm_response) == 100000
+
+    def test_llm_response_max_length_exceeded(self) -> None:
+        """Test llm_response exceeding 100k chars raises ValidationError."""
+        too_long = "A" * 100001
+
+        with pytest.raises(ValidationError):
+            Node(
+                type="question",
+                author="human",
+                content="Test",
+                llm_response=too_long
+            )
+
+    def test_all_feature_009_fields_combined(self) -> None:
+        """Test node with all Feature 009 fields set."""
+        op_id = uuid4()
+        response = "# Quantum Entanglement\n\nDetailed explanation..."
+
+        node = Node(
+            type="question",
+            author="human",
+            content="Explain quantum entanglement",
+            llm_response=response,
+            llm_operation_id=op_id,
+            font_size=18,
+            node_width=600,
+            node_height=800
+        )
+
+        assert node.llm_response == response
+        assert node.llm_operation_id == op_id
+        assert node.font_size == 18
+        assert node.node_width == 600
+        assert node.node_height == 800
+
+    def test_feature_009_json_serialization(self) -> None:
+        """Test Feature 009 fields serialize/deserialize correctly."""
+        op_id = uuid4()
+        node = Node(
+            type="question",
+            author="human",
+            content="Test question",
+            llm_response="# Response\n\nContent",
+            llm_operation_id=op_id,
+            font_size=16,
+            node_width=500,
+            node_height=600
+        )
+
+        json_str = node.model_dump_json()
+        restored = Node.model_validate_json(json_str)
+
+        assert restored.llm_response == "# Response\n\nContent"
+        assert restored.llm_operation_id == op_id
+        assert restored.font_size == 16
+        assert restored.node_width == 500
+        assert restored.node_height == 600
+
+    def test_backward_compatibility_old_nodes(self) -> None:
+        """Test old nodes without Feature 009 fields load correctly."""
+        # Simulate old node JSON (pre-Feature 009)
+        old_json = {
+            "id": str(uuid4()),
+            "type": "question",
+            "author": "human",
+            "content": "Old question",
+            "parents": [],
+            "children": [],
+            "groups": [],
+            "meta": {
+                "created_at": "2025-01-01T00:00:00Z",
+                "updated_at": "2025-01-01T00:00:00Z",
+                "importance": 0.5,
+                "tags": [],
+                "status": "draft",
+                "stop": False
+            }
+        }
+
+        node = Node.model_validate(old_json)
+
+        # Old fields work
+        assert node.content == "Old question"
+
+        # New fields have defaults
+        assert node.llm_response is None
+        assert node.llm_operation_id is None
+        assert node.font_size == 14
+        assert node.node_width == 400
+        assert node.node_height == 400

@@ -86,6 +86,13 @@ class UpdateNodeRequest(BaseModel):
     status: NodeStatus | None = None
     position: Position | None = None
 
+    # Feature 009: Inline LLM Response Display
+    llm_response: str | None = Field(None, max_length=100000)
+    llm_operation_id: UUID | None = None
+    font_size: int | None = Field(None, ge=10, le=24)
+    node_width: int | None = Field(None, ge=280, le=800)
+    node_height: int | None = Field(None, ge=200, le=1200)
+
 
 @router.get("/{graph_id}")
 async def get_graph(graph_id: str) -> Graph:
@@ -283,6 +290,18 @@ async def update_node(
         node.meta.status = update_req.status
     if update_req.position is not None:
         node.meta.position = update_req.position
+
+    # Feature 009: Update LLM response fields if provided
+    if update_req.llm_response is not None:
+        node.llm_response = update_req.llm_response
+    if update_req.llm_operation_id is not None:
+        node.llm_operation_id = update_req.llm_operation_id
+    if update_req.font_size is not None:
+        node.font_size = update_req.font_size
+    if update_req.node_width is not None:
+        node.node_width = update_req.node_width
+    if update_req.node_height is not None:
+        node.node_height = update_req.node_height
 
     # Update timestamp
     node.update_timestamp()

@@ -72,6 +72,13 @@ export interface Node {
   children: UUID[];
   groups: UUID[];
   meta: NodeMetadata;
+
+  // Feature 009: Inline LLM Response Display
+  llm_response?: string | null;
+  llm_operation_id?: UUID | null;
+  font_size?: number; // 10-24, default 14
+  node_width?: number; // 280-800, default 400
+  node_height?: number; // 200-1200, default 400
 }
 
 export type GroupKind = 'project' | 'cluster' | 'subgroup' | 'generated' | 'auto';

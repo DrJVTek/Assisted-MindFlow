@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-Process)",
+      "Bash(Where-Object {$_rocessName -eq \"node\"})",
+      "Bash(Select-Object Id,ProcessName)",
+      "Bash(Format-Table)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

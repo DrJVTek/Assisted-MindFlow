@@ -5,7 +5,7 @@ Nodes can be questions, answers, hypotheses, evaluations, summaries, etc.
 """
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -103,6 +103,13 @@ class Node(BaseModel):
     children: list[UUID] = Field(default_factory=list)
     groups: list[UUID] = Field(default_factory=list)
     meta: NodeMetadata = Field(default_factory=NodeMetadata)
+
+    # Feature 009: Inline LLM Response Display
+    llm_response: Optional[str] = Field(None, max_length=100000)
+    llm_operation_id: Optional[UUID] = None
+    font_size: int = Field(14, ge=10, le=24)
+    node_width: int = Field(400, ge=280, le=800)
+    node_height: int = Field(400, ge=200, le=1200)
 
     def update_timestamp(self) -> None:
         """Update the modified timestamp.

@@ -24,10 +24,10 @@
 
 **Purpose**: Install dependencies and basic infrastructure setup
 
-- [ ] T001 [P] Install react-markdown dependencies in frontend (npm install react-markdown remark-gfm rehype-highlight)
-- [ ] T002 [P] Import highlight.js CSS theme in frontend/src/main.tsx
-- [ ] T003 [P] Extend Node type with new fields in frontend/src/types/graph.ts (llm_response, llm_operation_id, font_size, node_width, node_height)
-- [ ] T004 [P] Extend Node model with new fields in backend/src/models/graph.py (llm_response, llm_operation_id, font_size, node_width, node_height)
+- [X] T001 [P] Install react-markdown dependencies in frontend (npm install react-markdown remark-gfm rehype-highlight)
+- [X] T002 [P] Import highlight.js CSS theme in frontend/src/main.tsx
+- [X] T003 [P] Extend Node type with new fields in frontend/src/types/graph.ts (llm_response, llm_operation_id, font_size, node_width, node_height)
+- [X] T004 [P] Extend Node model with new fields in src/mindflow/models/node.py (llm_response, llm_operation_id, font_size, node_width, node_height)
 
 **Checkpoint**: Dependencies installed, type definitions updated
 

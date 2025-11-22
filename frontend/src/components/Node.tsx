@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import type { NodeType, NodeAuthor, NodeStatus } from '../types/graph';
 import { useAutoLaunchLLM } from '../hooks/useAutoLaunchLLM';
+import { LLMNodeContent } from './LLMNodeContent';
 
 /**
  * Node data interface (received from React Flow)
@@ -50,6 +51,11 @@ interface NodeData {
   content?: string; // Full content (question text)
   graphId?: string; // Required for LLM operations
   id?: string; // Node UUID (alternative to nodeId)
+
+  // Feature 009: Display fields
+  llm_response?: string | null; // LLM response (markdown)
+  llm_operation_id?: string | null; // Active operation ID
+  font_size?: number; // Font size (10-24px range)
 }
 
 /**
@@ -151,6 +157,9 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     graphId = '',
     id,
     nodeId,
+    llm_response,
+    llm_operation_id,
+    font_size,
   } = data;
 
   // Feature 009: Auto-launch LLM on node creation
@@ -288,18 +297,27 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
             </div>
           </div>
 
-          {/* Content preview */}
-          <div
-            style={{
-              fontSize: '14px',
-              lineHeight: '1.5',
-              color: '#37474F',
-              wordWrap: 'break-word',
-              overflowWrap: 'break-word',
-            }}
-          >
-            {preview}
-          </div>
+          {/* Content: LLMNodeContent or preview */}
+          {(llm_response || llm_operation_id) ? (
+            <LLMNodeContent
+              question={content}
+              response={llm_response}
+              llmOperationId={llm_operation_id}
+              fontSize={font_size}
+            />
+          ) : (
+            <div
+              style={{
+                fontSize: '14px',
+                lineHeight: '1.5',
+                color: '#37474F',
+                wordWrap: 'break-word',
+                overflowWrap: 'break-word',
+              }}
+            >
+              {preview}
+            </div>
+          )}
 
           {/* Importance indicator (bottom border) */}
           {importance > 7 && (

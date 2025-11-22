@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mindflow.dev/schemas/node.json",
+  "title": "MindFlow Node",
+  "description": "Reasoning graph node with integrated LLM question-response capability",
+  "type": "object",
+  "required": ["id", "type", "content", "importance", "tags", "status", "created_at", "updated_at", "meta"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique node identifier"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["custom", "group", "comment"],
+      "description": "Node type"
+    },
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50000,
+      "description": "Node content (question for LLM nodes)"
+    },
+    "importance": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10,
+      "description": "Node importance rating"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Node tags for categorization"
+    },
+    "status": {
+      "type": "string",
+      "description": "Node status"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Node creation timestamp"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last update timestamp"
+    },
+    "meta": {
+      "type": "object",
+      "description": "Additional metadata"
+    },
+    "llm_response": {
+      "type": ["string", "null"],
+      "maxLength": 100000,
+      "description": "LLM-generated markdown response (null if not yet generated)"
+    },
+    "llm_operation_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Active LLM operation ID (null when no operation active)"
+    },
+    "font_size": {
+      "type": "integer",
+      "minimum": 10,
+      "maximum": 24,
+      "default": 14,
+      "description": "Font size in pixels for node content"
+    },
+    "node_width": {
+      "type": "integer",
+      "minimum": 280,
+      "maximum": 800,
+      "default": 400,
+      "description": "Node width in pixels"
+    },
+    "node_height": {
+      "type": "integer",
+      "minimum": 200,
+      "maximum": 1200,
+      "default": 400,
+      "description": "Node height in pixels"
+    }
+  },
+  "examples": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "type": "custom",
+      "content": "Explain quantum entanglement",
+      "importance": 5,
+      "tags": ["physics", "quantum"],
+      "status": "active",
+      "created_at": "2025-11-22T10:00:00Z",
+      "updated_at": "2025-11-22T10:01:30Z",
+      "meta": {},
+      "llm_response": "# Quantum Entanglement\n\nQuantum entanglement is a phenomenon where two particles become correlated...",
+      "llm_operation_id": null,
+      "font_size": 14,
+      "node_width": 400,
+      "node_height": 400
+    }
+  ]
+}

@@ -9,8 +9,8 @@
  * - Author indicators (human/llm/tool)
  */
 
-import React, { memo } from 'react';
-import { Handle, Position } from 'reactflow';
+import React, { memo, useState } from 'react';
+import { Handle, Position, NodeResizer } from 'reactflow';
 import {
   MessageCircleQuestion,
   MessageCircleReply,
@@ -25,10 +25,13 @@ import {
   Bot,
   User,
   Wrench,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import type { NodeType, NodeAuthor, NodeStatus } from '../types/graph';
 import { useAutoLaunchLLM } from '../hooks/useAutoLaunchLLM';
 import { LLMNodeContent } from './LLMNodeContent';
+import { api } from '../services/api';
 
 /**
  * Node data interface (received from React Flow)
@@ -159,8 +162,11 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     nodeId,
     llm_response,
     llm_operation_id,
-    font_size,
+    font_size: initialFontSize,
   } = data;
+
+  // Feature 009 T028-T029: Local font size state
+  const [fontSize, setFontSize] = useState(initialFontSize || 14);
 
   // Feature 009: Auto-launch LLM on node creation
   useAutoLaunchLLM({
@@ -169,6 +175,29 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     isNewNode,
     content,
   });
+
+  // Feature 009 T028-T031: Font size handlers
+  const increaseFontSize = () => {
+    const newSize = Math.min(fontSize + 2, 24); // Max 24px
+    setFontSize(newSize);
+    // Persist to backend
+    if (graphId && (id || nodeId)) {
+      api.updateNode(graphId, id || nodeId, { font_size: newSize }).catch(err =>
+        console.error('Failed to persist font size:', err)
+      );
+    }
+  };
+
+  const decreaseFontSize = () => {
+    const newSize = Math.max(fontSize - 2, 10); // Min 10px
+    setFontSize(newSize);
+    // Persist to backend
+    if (graphId && (id || nodeId)) {
+      api.updateNode(graphId, id || nodeId, { font_size: newSize }).catch(err =>
+        console.error('Failed to persist font size:', err)
+      );
+    }
+  };
 
   const statusColor = getStatusColor(status);
   const isZoomedOut = currentZoom < 0.5; // Simplify rendering below 50% zoom
@@ -197,6 +226,16 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >
+      {/* Feature 009 T027: NodeResizer - only show when selected */}
+      {selected && (
+        <NodeResizer
+          minWidth={200}
+          minHeight={100}
+          maxWidth={600}
+          maxHeight={800}
+        />
+      )}
+
       {/* Connection handles */}
       <Handle
         type="target"
@@ -244,7 +283,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
         </div>
       ) : (
         <>
-          {/* Header: Type icon + Status badge + Author */}
+          {/* Header: Type icon + Status badge + Author + Font controls */}
           <div
             style={{
               display: 'flex',
@@ -270,8 +309,47 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
               </span>
             </div>
 
-            {/* Status badge + Author icon */}
+            {/* Status badge + Author icon + Font controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {/* Feature 009 T028: Font size controls - only show when LLM content present */}
+              {(llm_response || llm_operation_id) && selected && (
+                <>
+                  <button
+                    onClick={decreaseFontSize}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      color: '#546E7A',
+                    }}
+                    title="Decrease font size"
+                  >
+                    <ZoomOut size={14} />
+                  </button>
+                  <span style={{ fontSize: '10px', color: '#78909C', minWidth: '28px', textAlign: 'center' }}>
+                    {fontSize}px
+                  </span>
+                  <button
+                    onClick={increaseFontSize}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      color: '#546E7A',
+                    }}
+                    title="Increase font size"
+                  >
+                    <ZoomIn size={14} />
+                  </button>
+                </>
+              )}
+
               {/* Status badge */}
               <div
                 style={{
@@ -303,7 +381,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
               question={content}
               response={llm_response}
               llmOperationId={llm_operation_id}
-              fontSize={font_size}
+              fontSize={fontSize}
             />
           ) : (
             <div

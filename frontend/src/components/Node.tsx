@@ -27,6 +27,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { NodeType, NodeAuthor, NodeStatus } from '../types/graph';
+import { useAutoLaunchLLM } from '../hooks/useAutoLaunchLLM';
 
 /**
  * Node data interface (received from React Flow)
@@ -43,6 +44,12 @@ interface NodeData {
   borderWidth: number;
   opacity: number;
   currentZoom?: number; // Optional: for zoom-based rendering
+
+  // Feature 009: Auto-launch fields
+  isNewNode?: boolean; // Flag for auto-launch trigger
+  content?: string; // Full content (question text)
+  graphId?: string; // Required for LLM operations
+  id?: string; // Node UUID (alternative to nodeId)
 }
 
 /**
@@ -138,7 +145,21 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     borderWidth,
     opacity,
     currentZoom = 1.0,
+    // Feature 009 fields
+    isNewNode = false,
+    content = '',
+    graphId = '',
+    id,
+    nodeId,
   } = data;
+
+  // Feature 009: Auto-launch LLM on node creation
+  useAutoLaunchLLM({
+    nodeId: id || nodeId,
+    graphId,
+    isNewNode,
+    content,
+  });
 
   const statusColor = getStatusColor(status);
   const isZoomedOut = currentZoom < 0.5; // Simplify rendering below 50% zoom

@@ -498,8 +498,48 @@ function CanvasInner() {
 
         console.log('Node created successfully:', createdNode);
 
-        // Force reload graph data to show the new node
-        window.location.reload();
+        // Feature 009: Add node to local state with isNewNode flag for auto-launch
+        // Calculate position for new node (centered in viewport or near parent)
+        const newPosition = nodeData.parentId
+          ? { x: 100, y: 100 } // TODO: Calculate position near parent
+          : { x: 100, y: 100 }; // TODO: Center in viewport
+
+        const newReactFlowNode = {
+          id: createdNode.id,
+          type: 'custom', // Or based on nodeData.type
+          position: newPosition,
+          data: {
+            ...createdNode,
+            isNewNode: true, // Feature 009: Flag for auto-launch trigger
+            graphId, // Feature 009: Required for LLM operations
+          },
+        };
+
+        // Add to local nodes
+        setLocalNodes((prev) => [...prev, newReactFlowNode]);
+
+        // If there's a parent, add edge
+        if (nodeData.parentId) {
+          setLocalEdges((prev) => [
+            ...prev,
+            {
+              id: `${nodeData.parentId}-${createdNode.id}`,
+              source: nodeData.parentId,
+              target: createdNode.id,
+            },
+          ]);
+        }
+
+        // Clear isNewNode flag after a short delay to prevent re-triggering on subsequent renders
+        setTimeout(() => {
+          setLocalNodes((prev) =>
+            prev.map((node) =>
+              node.id === createdNode.id
+                ? { ...node, data: { ...node.data, isNewNode: false } }
+                : node
+            )
+          );
+        }, 1000);
       } catch (error) {
         console.error('Error creating node:', error);
         alert(`Error creating node: ${error instanceof Error ? error.message : 'Unknown error'}`);

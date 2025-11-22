@@ -58,14 +58,14 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T009 [P] [US1] Unit test for useAutoLaunchLLM hook in frontend/tests/unit/useAutoLaunchLLM.test.ts (test launches on isNewNode=true, skips when false, prevents duplicates)
+- [X] T009 [P] [US1] Unit test for useAutoLaunchLLM hook in frontend/tests/unit/useAutoLaunchLLM.test.ts (test launches on isNewNode=true, skips when false, prevents duplicates)
 - [ ] T010 [P] [US1] Integration test for auto-launch flow in frontend/tests/integration/auto_launch_flow.test.tsx (end-to-end: create node → auto-launch → response display)
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] Create useAutoLaunchLLM hook in frontend/src/hooks/useAutoLaunchLLM.ts (useEffect + useRef pattern, triggers LLM on isNewNode flag)
-- [ ] T012 [US1] Add isNewNode flag to node creation logic in frontend/src/components/Canvas.tsx (set flag when creating node, pass to Node component)
-- [ ] T013 [US1] Integrate useAutoLaunchLLM into Node component in frontend/src/components/Node.tsx (call hook with nodeId, graphId, isNewNode, content)
+- [X] T011 [US1] Create useAutoLaunchLLM hook in frontend/src/hooks/useAutoLaunchLLM.ts (useEffect + useRef pattern, triggers LLM on isNewNode flag)
+- [X] T012 [US1] Add isNewNode flag to node creation logic in frontend/src/components/Canvas.tsx (set flag when creating node, pass to Node component)
+- [X] T013 [US1] Integrate useAutoLaunchLLM into Node component in frontend/src/components/Node.tsx (call hook with nodeId, graphId, isNewNode, content)
 - [ ] T014 [US1] Update node state to track llm_operation_id during streaming in frontend/src/stores/llmOperationsStore.ts (link operation to node)
 - [ ] T015 [US1] Persist llm_response to backend on completion in frontend/src/hooks/useStreamingContent.ts (call updateNode API with response)
 

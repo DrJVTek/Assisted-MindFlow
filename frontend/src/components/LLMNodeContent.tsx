@@ -1,135 +1,116 @@
 /**
- * LLMNodeContent - Node content with LLM streaming support
+ * LLMNodeContent - Display question and LLM response in dual-pane layout
  *
- * Displays either:
- * - Static node content (normal mode)
- * - Streaming LLM content (when LLM is generating)
- * - Streaming indicator (during LLM operation)
+ * Feature 009: Inline LLM Response Display - User Story 2
+ *
+ * Layout:
+ * - Question section (fixed at top, flex-shrink: 0)
+ * - Response section (scrollable, flex: 1, overflow-y: auto)
  *
  * Features:
- * - Auto-switches between static and streaming content
- * - Shows streaming indicator badge
- * - Displays progress
- * - Handles errors
- *
- * Example:
- * ```tsx
- * <LLMNodeContent
- *   nodeId={nodeId}
- *   staticContent={node.content}
- *   maxLength={100}
- * />
- * ```
+ * - Markdown-formatted response via MarkdownRenderer
+ * - Loading state (when operation active but no response yet)
+ * - Empty state (no response and no active operation)
+ * - Scroll optimization (will-change, contain, smooth scroll)
+ * - Accessibility (aria-labels, aria-live for loading)
+ * - Font size control (10-24px range)
  */
 
-import React, { useMemo } from 'react';
+import React from 'react';
+import { MarkdownRenderer } from './MarkdownRenderer';
+import './LLMNodeContent.css';
 import type { UUID } from '../types/uuid';
-import { useLLMOperationsStore } from '../stores/llmOperationsStore';
-import { useStreamingContentStore } from '../stores/streamingContentStore';
-import { StreamingIndicator } from './StreamingIndicator';
 
 export interface LLMNodeContentProps {
   /**
-   * Node ID
+   * Question text (displayed at top)
    */
-  nodeId: UUID;
+  question: string;
 
   /**
-   * Static content (from database)
+   * LLM response (markdown-formatted, displayed below question)
    */
-  staticContent: string;
+  response: string | null | undefined;
 
   /**
-   * Maximum content length to display
+   * Active LLM operation ID (for tracking loading state)
    */
-  maxLength?: number;
+  llmOperationId?: UUID | null;
 
   /**
-   * Show streaming indicator badge
+   * Font size in pixels (10-24px range, default: 14px)
    */
-  showIndicator?: boolean;
-
-  /**
-   * Additional CSS class
-   */
-  className?: string;
+  fontSize?: number;
 }
 
 /**
- * Node content with LLM streaming support
+ * Clamp font size to valid range (10-24px)
  */
-export const LLMNodeContent: React.FC<LLMNodeContentProps> = ({
-  nodeId,
-  staticContent,
-  maxLength = 200,
-  showIndicator = true,
-  className = ''
-}) => {
-  // Get active operation for this node
-  const operations = useLLMOperationsStore(state => state.getOperationsByNode(nodeId));
-  const activeOperation = useMemo(
-    () => operations.find(op => op.status === 'processing' || op.status === 'streaming'),
-    [operations]
-  );
+function clampFontSize(size: number | undefined): number {
+  const MIN_SIZE = 10;
+  const MAX_SIZE = 24;
+  const DEFAULT_SIZE = 14;
 
-  // Get streaming content (selective subscription - only this node)
-  const streamingContent = useStreamingContentStore(
-    state => state.nodeContent.get(nodeId)
-  );
+  if (size === undefined) {
+    return DEFAULT_SIZE;
+  }
 
-  // Determine which content to show
-  const displayContent = useMemo(() => {
-    // Show streaming content if available
-    if (streamingContent && activeOperation) {
-      return streamingContent;
-    }
+  return Math.max(MIN_SIZE, Math.min(MAX_SIZE, size));
+}
 
-    // Fallback to static content
-    return staticContent;
-  }, [streamingContent, activeOperation, staticContent]);
+/**
+ * LLMNodeContent Component
+ *
+ * Displays question and response in split layout with scrolling
+ */
+export function LLMNodeContent({
+  question,
+  response,
+  llmOperationId,
+  fontSize
+}: LLMNodeContentProps) {
+  // Clamp font size to valid range
+  const validFontSize = clampFontSize(fontSize);
 
-  // Truncate if needed
-  const truncatedContent = useMemo(() => {
-    if (displayContent.length <= maxLength) {
-      return displayContent;
-    }
-    return displayContent.substring(0, maxLength) + '...';
-  }, [displayContent, maxLength]);
+  // Determine display state
+  const hasResponse = response !== null && response !== undefined && response.trim() !== '';
+  const isLoading = !hasResponse && llmOperationId !== null && llmOperationId !== undefined;
+  const isEmpty = !hasResponse && !isLoading;
 
   return (
-    <div className={`llm-node-content ${className}`}>
-      {/* Streaming indicator badge */}
-      {showIndicator && activeOperation && (
-        <div className="mb-2">
-          <StreamingIndicator
-            status={activeOperation.status}
-            progress={activeOperation.progress}
-            compact={true}
-          />
-        </div>
-      )}
-
-      {/* Content */}
-      <div
-        className="whitespace-pre-wrap break-words"
-        style={{
-          fontSize: '14px',
-          lineHeight: '1.5',
-          color: '#333',
-        }}
-      >
-        {truncatedContent || <span className="text-gray-400 italic">Empty</span>}
+    <div className="llm-node-content">
+      {/* Question Section (Fixed at top, does not scroll) */}
+      <div className="llm-node-question">
+        <div className="llm-node-question-label">Question:</div>
+        <div className="llm-node-question-text">{question}</div>
       </div>
 
-      {/* Streaming cursor (blinking) */}
-      {activeOperation && activeOperation.status === 'streaming' && (
-        <span
-          className="inline-block w-2 h-4 ml-1 bg-blue-500 animate-pulse"
-          style={{
-            animation: 'blink 1s infinite',
-          }}
-        />
-      )}
+      {/* Response Section (Scrollable) */}
+      <div
+        className="llm-node-response"
+        style={{ fontSize: `${validFontSize}px` }}
+        aria-label="LLM Response"
+      >
+        {/* Loading State */}
+        {isLoading && (
+          <div className="llm-node-loading" aria-live="polite">
+            <div className="llm-node-loading-spinner"></div>
+            <div className="llm-node-loading-text">Generating response...</div>
+          </div>
+        )}
+
+        {/* Empty State */}
+        {isEmpty && (
+          <div className="llm-node-empty">
+            No response yet
+          </div>
+        )}
+
+        {/* Response Content (Markdown) */}
+        {hasResponse && (
+          <MarkdownRenderer content={response} />
+        )}
+      </div>
     </div>
   );
-};
+}

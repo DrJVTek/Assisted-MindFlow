@@ -1,0 +1,223 @@
+/**
+ * LLMNodeContent Styles
+ *
+ * Feature 009: Inline LLM Response Display - User Story 2
+ *
+ * T018: Split layout (question fixed, response scrollable)
+ * T019: Scroll optimization
+ * T021: Accessibility (prefers-reduced-motion)
+ */
+
+/* Container - Vertical flexbox layout */
+.llm-node-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  gap: 8px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Question Section - Fixed at top, does not scroll */
+.llm-node-question {
+  flex-shrink: 0; /* T018: Prevent shrinking */
+  padding: 8px 12px;
+  background-color: #F5F5F5;
+  border-radius: 6px;
+  border-left: 3px solid #1976D2;
+}
+
+.llm-node-question-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #546E7A;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.llm-node-question-text {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #263238;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Response Section - Scrollable */
+.llm-node-response {
+  flex: 1; /* T018: Expand to fill remaining space */
+  overflow-y: auto; /* T018: Scrollable when content exceeds height */
+  overflow-x: hidden;
+  padding: 8px 12px;
+  background-color: #FAFAFA;
+  border-radius: 6px;
+  line-height: 1.6;
+  color: #263238;
+
+  /* T019: Scroll optimization */
+  will-change: transform; /* Hint browser for smooth scrolling */
+  contain: paint layout; /* Isolate rendering for performance */
+  scroll-behavior: smooth; /* Smooth scroll by default */
+
+  /* Custom scrollbar styling */
+  scrollbar-width: thin;
+  scrollbar-color: #B0BEC5 #ECEFF1;
+}
+
+/* T021: Accessibility - respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .llm-node-response {
+    scroll-behavior: auto; /* Disable smooth scroll for users with motion sensitivity */
+  }
+}
+
+/* Webkit browsers (Chrome, Safari, Edge) scrollbar */
+.llm-node-response::-webkit-scrollbar {
+  width: 8px;
+}
+
+.llm-node-response::-webkit-scrollbar-track {
+  background: #ECEFF1;
+  border-radius: 4px;
+}
+
+.llm-node-response::-webkit-scrollbar-thumb {
+  background: #B0BEC5;
+  border-radius: 4px;
+}
+
+.llm-node-response::-webkit-scrollbar-thumb:hover {
+  background: #90A4AE;
+}
+
+/* Loading State */
+.llm-node-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  color: #546E7A;
+}
+
+.llm-node-loading-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid #E3F2FD;
+  border-top-color: #1976D2;
+  border-radius: 50%;
+  animation: llm-spinner-rotate 0.8s linear infinite;
+}
+
+@keyframes llm-spinner-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.llm-node-loading-text {
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Empty State */
+.llm-node-empty {
+  padding: 16px;
+  text-align: center;
+  color: #78909C;
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Markdown content adjustments within response */
+.llm-node-response .markdown-renderer {
+  /* Ensure markdown content inherits font size */
+  font-size: inherit;
+}
+
+/* Code blocks within response */
+.llm-node-response pre {
+  margin: 12px 0;
+  background-color: #263238;
+  border-radius: 4px;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.llm-node-response code {
+  font-family: 'Courier New', Consolas, Monaco, monospace;
+  font-size: 0.9em;
+}
+
+/* Lists within response */
+.llm-node-response ul,
+.llm-node-response ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.llm-node-response li {
+  margin: 4px 0;
+}
+
+/* Headings within response */
+.llm-node-response h1,
+.llm-node-response h2,
+.llm-node-response h3,
+.llm-node-response h4,
+.llm-node-response h5,
+.llm-node-response h6 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #263238;
+}
+
+.llm-node-response h1 {
+  font-size: 1.5em;
+}
+
+.llm-node-response h2 {
+  font-size: 1.3em;
+}
+
+.llm-node-response h3 {
+  font-size: 1.1em;
+}
+
+/* Paragraphs within response */
+.llm-node-response p {
+  margin: 8px 0;
+}
+
+/* Tables within response */
+.llm-node-response table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+}
+
+.llm-node-response th,
+.llm-node-response td {
+  border: 1px solid #CFD8DC;
+  padding: 8px;
+  text-align: left;
+}
+
+.llm-node-response th {
+  background-color: #ECEFF1;
+  font-weight: 600;
+}
+
+/* Links within response */
+.llm-node-response a {
+  color: #1976D2;
+  text-decoration: underline;
+}
+
+.llm-node-response a:hover {
+  color: #1565C0;
+}

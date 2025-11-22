@@ -54,6 +54,11 @@ export interface UseStreamingContentOptions {
    * Maximum reconnection attempts
    */
   maxReconnectAttempts?: number;
+
+  /**
+   * Graph ID for persisting response (Feature 009)
+   */
+  graphId?: UUID;
 }
 
 /**
@@ -68,7 +73,8 @@ export function useStreamingContent(
     onError,
     onToken,
     autoReconnect = true,
-    maxReconnectAttempts = 3
+    maxReconnectAttempts = 3,
+    graphId // Feature 009 T015: For persisting llm_response
   } = options;
 
   // State
@@ -88,6 +94,7 @@ export function useStreamingContent(
 
   const appendContent = useStreamingContentStore(state => state.appendContent);
   const clearContent = useStreamingContentStore(state => state.clearContent);
+  const getContent = useStreamingContentStore(state => state.getContent); // Feature 009 T015
 
   /**
    * Start streaming for an operation
@@ -142,12 +149,36 @@ export function useStreamingContent(
       });
 
       // Handle completion
-      eventSource.addEventListener('complete', (e: MessageEvent) => {
+      eventSource.addEventListener('complete', async (e: MessageEvent) => {
         const data = JSON.parse(e.data);
         const tokensUsed = data.tokens_used || 0;
 
         // Update store
         completeOperation(operationId, tokensUsed);
+
+        // Feature 009 T015: Persist llm_response to backend
+        if (graphId) {
+          try {
+            const finalContent = getContent(nodeId);
+            const response = await fetch(`/api/graphs/${graphId}/nodes/${nodeId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                llm_response: finalContent,
+                llm_operation_id: null // Clear operation ID on completion
+              })
+            });
+
+            if (!response.ok) {
+              console.warn('[useStreamingContent] Failed to persist llm_response:', response.statusText);
+            } else {
+              console.log(`[useStreamingContent] Persisted llm_response for node ${nodeId}`);
+            }
+          } catch (persistError) {
+            console.error('[useStreamingContent] Error persisting llm_response:', persistError);
+            // Don't fail the whole operation if persistence fails
+          }
+        }
 
         // Close connection
         eventSource.close();
@@ -227,13 +258,15 @@ export function useStreamingContent(
     reconnectAttempts,
     appendContent,
     clearContent,
+    getContent,
     updateStatus,
     updateProgress,
     completeOperation,
     failOperation,
     onComplete,
     onError,
-    onToken
+    onToken,
+    graphId
   ]);
 
   /**

@@ -91,7 +91,9 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
   const { createOperation } = useLLMOperationsStore();
 
   // Get streaming hook
-  const { startStreaming } = useStreamingContent(nodeId);
+  const { startStreaming } = useStreamingContent(nodeId, {
+    graphId // Feature 009 T015: Pass graphId for persistence
+  });
 
   useEffect(() => {
     // Skip if:
@@ -124,9 +126,28 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
           }
         });
 
-        console.log(`[useAutoLaunchLLM] Created operation ${operationId}, starting stream...`);
+        console.log(`[useAutoLaunchLLM] Created operation ${operationId}`);
+
+        // Feature 009 T014: Update node's llm_operation_id to track active operation
+        try {
+          const response = await fetch(`/api/graphs/${graphId}/nodes/${nodeId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ llm_operation_id: operationId })
+          });
+
+          if (!response.ok) {
+            console.warn('[useAutoLaunchLLM] Failed to update node llm_operation_id:', response.statusText);
+          } else {
+            console.log(`[useAutoLaunchLLM] Updated node ${nodeId} with operation ID ${operationId}`);
+          }
+        } catch (updateError) {
+          console.warn('[useAutoLaunchLLM] Error updating node llm_operation_id:', updateError);
+          // Don't fail the whole operation if this update fails
+        }
 
         // Start streaming
+        console.log(`[useAutoLaunchLLM] Starting stream for operation ${operationId}...`);
         await startStreaming(operationId);
 
         console.log(`[useAutoLaunchLLM] Stream started for operation ${operationId}`);

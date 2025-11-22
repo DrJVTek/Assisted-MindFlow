@@ -27,6 +27,7 @@ import { Settings, RefreshCw, Undo, Redo } from 'lucide-react';
 import 'reactflow/dist/style.css';
 
 import { useCanvasStore } from '../stores/canvasStore';
+import { useLLMOperationsStore } from '../stores/llmOperationsStore';
 import { useGraphData } from '../features/canvas/hooks/useGraphData';
 import { useViewport } from '../features/canvas/hooks/useViewport';
 import { useLayout } from '../features/canvas/hooks/useLayout';
@@ -83,6 +84,7 @@ export function Canvas() {
  */
 function CanvasInner() {
   const { selectNode, preferences, selectedNodeId, createCanvas, canvases, activeCanvasId, fetchCanvases } = useCanvasStore();
+  const { cancelOperation } = useLLMOperationsStore(); // Feature 009 T023
   const [currentZoom, setCurrentZoom] = useState(1.0);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const reactFlowInstance = useReactFlow();
@@ -423,13 +425,44 @@ function CanvasInner() {
     }
   }, [contextMenu, closeContextMenu]);
 
-  const handleAskLLM = useCallback(() => {
-    if (contextMenu?.nodeId) {
-      setLLMNodeId(contextMenu.nodeId);
-      setLLMDialogOpen(true);
-      closeContextMenu();
+  const handleAskLLM = useCallback(async () => {
+    if (!contextMenu?.nodeId || !graphData) return;
+
+    const node = graphData.nodes[contextMenu.nodeId];
+    if (!node) return;
+
+    // Feature 009 T023: Cancel existing operation if present
+    if (node.llm_operation_id) {
+      try {
+        console.log(`[handleAskLLM] Cancelling existing operation: ${node.llm_operation_id}`);
+        await cancelOperation(node.llm_operation_id);
+        console.log('[handleAskLLM] Operation cancelled successfully');
+      } catch (error) {
+        console.error('[handleAskLLM] Error cancelling operation:', error);
+        // Continue anyway - user wants to regenerate
+      }
+
+      // Feature 009 T024: Clear llm_response locally before starting new operation
+      try {
+        console.log(`[handleAskLLM] Clearing llm_response for node ${contextMenu.nodeId}`);
+        await api.updateNode(graphId, contextMenu.nodeId, {
+          llm_response: null,
+          llm_operation_id: null
+        });
+        console.log('[handleAskLLM] Response cleared successfully');
+
+        // Force reload to show cleared state
+        window.location.reload();
+      } catch (error) {
+        console.error('[handleAskLLM] Error clearing response:', error);
+        // Continue anyway - user wants to regenerate
+      }
     }
-  }, [contextMenu, closeContextMenu]);
+
+    setLLMNodeId(contextMenu.nodeId);
+    setLLMDialogOpen(true);
+    closeContextMenu();
+  }, [contextMenu, graphData, graphId, cancelOperation, closeContextMenu]);
 
   const handleDeleteNode = useCallback(async () => {
     if (!contextMenu?.nodeId) return;

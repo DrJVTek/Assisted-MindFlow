@@ -35,8 +35,8 @@ export function toELKGraph(
   // Convert ReactFlow nodes to ELK nodes
   const elkNodes: ELKNode[] = nodes.map((node) => ({
     id: node.id,
-    width: node.measured?.width || DEFAULT_NODE_WIDTH,
-    height: node.measured?.height || DEFAULT_NODE_HEIGHT,
+    width: (node as any).measured?.width || DEFAULT_NODE_WIDTH,
+    height: (node as any).measured?.height || DEFAULT_NODE_HEIGHT,
   }));
 
   // Convert ReactFlow edges to ELK edges

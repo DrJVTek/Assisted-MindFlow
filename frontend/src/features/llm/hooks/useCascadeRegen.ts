@@ -12,8 +12,8 @@ export interface CascadeRegenOptions {
 
 export interface CascadeRegenResult {
   success: boolean;
-  affectedNodes: string[];
-  regeneratedCount: number;
+  affected_nodes: string[];
+  regenerated_count: number;
   errors: Array<{ node_id: string; error: string }>;
   message: string;
 }

@@ -34,6 +34,7 @@ interface ContextMenuProps {
   onAskLLM?: () => void;
   onViewHistory?: () => void;
   onSettings?: () => void;
+  onProperties?: () => void;
 }
 
 export function ContextMenu({
@@ -50,6 +51,7 @@ export function ContextMenu({
   onAskLLM,
   onViewHistory,
   onSettings,
+  onProperties,
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -143,6 +145,19 @@ export function ContextMenu({
           onEdit();
           onClose();
         },
+      });
+    }
+
+    if (onProperties) {
+      actions.push({
+        id: 'properties',
+        label: 'Properties',
+        icon: <Settings size={16} />,
+        onClick: () => {
+          onProperties();
+          onClose();
+        },
+        dividerAfter: true,
       });
     }
 

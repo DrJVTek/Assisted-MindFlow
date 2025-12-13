@@ -149,8 +149,16 @@ export function findConnectedEdges(
 
 /**
  * Convert VisualNode to React Flow Node format
+ *
+ * @param visualNode - Visual representation from transformNode
+ * @param originalNode - Original Graph node (for Feature 009 LLM fields)
+ * @param graphId - Graph ID (for Feature 009 LLM operations)
  */
-export function visualNodeToReactFlowNode(visualNode: VisualNode): any {
+export function visualNodeToReactFlowNode(
+  visualNode: VisualNode,
+  originalNode: Node,
+  graphId: string
+): any {
   return {
     id: visualNode.nodeId,
     type: 'custom', // Use custom node component
@@ -167,6 +175,18 @@ export function visualNodeToReactFlowNode(visualNode: VisualNode): any {
       borderColor: visualNode.style.borderColor,
       borderWidth: visualNode.style.borderWidth,
       opacity: visualNode.style.opacity,
+
+      // Feature 009: Pass through LLM fields for auto-launch and inline display
+      graphId: graphId,
+      content: originalNode.content,
+      llm_response: originalNode.llm_response,
+      llm_operation_id: originalNode.llm_operation_id,
+      font_size: originalNode.font_size,
+      node_width: originalNode.node_width,
+      node_height: originalNode.node_height,
+
+      // isNewNode flag will be set separately when creating new nodes in Canvas.tsx
+      isNewNode: false,
     },
   };
 }
@@ -257,7 +277,11 @@ export function transformGraphToReactFlow(graph: Graph): {
   const { nodes: visualNodes, edges: connectionLines } = transformGraphToCanvas(graph);
 
   // Transform regular nodes
-  const regularNodes = visualNodes.map(visualNodeToReactFlowNode);
+  // Pass both visual node AND original node data for Feature 009 fields
+  const regularNodes = visualNodes.map(visualNode => {
+    const originalNode = graph.nodes[visualNode.nodeId];
+    return visualNodeToReactFlowNode(visualNode, originalNode, graph.id);
+  });
 
   // Transform groups
   const groupNodes = Object.values(graph.groups || {}).map((group, index) =>

@@ -20,7 +20,8 @@
 
 /* Question Section - Fixed at top, does not scroll */
 .llm-node-question {
-  flex-shrink: 0; /* T018: Prevent shrinking */
+  flex-shrink: 0;
+  /* T018: Prevent shrinking */
   padding: 8px 12px;
   background-color: #F5F5F5;
   border-radius: 6px;
@@ -46,8 +47,10 @@
 
 /* Response Section - Scrollable */
 .llm-node-response {
-  flex: 1; /* T018: Expand to fill remaining space */
-  overflow-y: auto; /* T018: Scrollable when content exceeds height */
+  flex: 1;
+  /* T018: Expand to fill remaining space */
+  overflow-y: auto;
+  /* T018: Scrollable when content exceeds height */
   overflow-x: hidden;
   padding: 8px 12px;
   background-color: #FAFAFA;
@@ -56,9 +59,12 @@
   color: #263238;
 
   /* T019: Scroll optimization */
-  will-change: transform; /* Hint browser for smooth scrolling */
-  contain: paint layout; /* Isolate rendering for performance */
-  scroll-behavior: smooth; /* Smooth scroll by default */
+  will-change: transform;
+  /* Hint browser for smooth scrolling */
+  contain: paint layout;
+  /* Isolate rendering for performance */
+  scroll-behavior: smooth;
+  /* Smooth scroll by default */
 
   /* Custom scrollbar styling */
   scrollbar-width: thin;
@@ -68,7 +74,8 @@
 /* T021: Accessibility - respect reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   .llm-node-response {
-    scroll-behavior: auto; /* Disable smooth scroll for users with motion sensitivity */
+    scroll-behavior: auto;
+    /* Disable smooth scroll for users with motion sensitivity */
   }
 }
 
@@ -113,6 +120,7 @@
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
@@ -220,4 +228,23 @@
 
 .llm-node-response a:hover {
   color: #1565C0;
+}
+
+/* Prompt Textarea Scrollbar */
+.prompt-zone textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.prompt-zone textarea::-webkit-scrollbar-track {
+  background: #ECEFF1;
+  border-radius: 4px;
+}
+
+.prompt-zone textarea::-webkit-scrollbar-thumb {
+  background: #B0BEC5;
+  border-radius: 4px;
+}
+
+.prompt-zone textarea::-webkit-scrollbar-thumb:hover {
+  background: #90A4AE;
 }

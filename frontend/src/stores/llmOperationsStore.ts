@@ -223,7 +223,7 @@ export const useLLMOperationsStore = create<LLMOperationsState>((set, get) => ({
   },
 
   // Complete operation
-  completeOperation: (operationId, tokensUsed) => {
+  completeOperation: (operationId, _tokensUsed) => {
     set((state) => {
       const op = state.operations.get(operationId);
       if (!op) return state;

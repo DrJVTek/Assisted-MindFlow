@@ -11,7 +11,7 @@
 
 import ELK from 'elkjs/lib/elk.bundled.js';
 import type { Node, Edge } from 'reactflow';
-import type { LayoutOptions } from '../../../types/layout';
+import type { LayoutOptions, ELKGraph } from '../../../types/layout';
 import { toELKGraph, fromELKGraph } from '../utils/elkjsAdapter';
 
 // Create ELK instance (synchronous, Promise-based API)
@@ -83,7 +83,7 @@ export async function computeLayout(
 
   // Compute layout using elkjs
   // This is synchronous computation but returns a Promise
-  const layoutedGraph = await elk.layout(elkGraph);
+  const layoutedGraph = (await elk.layout(elkGraph)) as unknown as ELKGraph;
 
   // Convert back to ReactFlow format with updated positions
   const layoutedNodes = fromELKGraph(layoutedGraph, nodes);

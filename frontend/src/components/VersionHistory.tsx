@@ -15,7 +15,7 @@ import {
   Clock,
   RotateCcw,
   User,
-  Bot,
+
   GitBranch,
   RefreshCw,
   ChevronRight,
@@ -159,14 +159,14 @@ function formatTimestamp(isoString: string): string {
 export const VersionHistory: React.FC<VersionHistoryProps> = ({
   graphId,
   nodeId,
-  currentContent,
+
   onClose,
   onRestore,
 }) => {
   const [versions, setVersions] = useState<NodeVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedVersion, setSelectedVersion] = useState<NodeVersion | null>(null);
+
   const [expandedVersions, setExpandedVersions] = useState<Set<string>>(new Set());
 
   // Load versions on mount

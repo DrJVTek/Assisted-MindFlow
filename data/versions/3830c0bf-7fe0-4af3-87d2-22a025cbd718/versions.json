@@ -1,0 +1,20 @@
+[
+  {
+    "version_id": "a9333ae1-8666-405c-a9cc-ffa8a64df7ef",
+    "node_id": "3830c0bf-7fe0-4af3-87d2-22a025cbd718",
+    "version_number": 1,
+    "content": "quel couleur aime tu ?",
+    "created_at": "2025-11-23T00:55:38.284719Z",
+    "trigger_reason": "manual_edit",
+    "llm_metadata": null
+  },
+  {
+    "version_id": "196f4af3-d587-4c84-a666-60b9c579e6c4",
+    "node_id": "3830c0bf-7fe0-4af3-87d2-22a025cbd718",
+    "version_number": 2,
+    "content": "quel couleur aime tu ?",
+    "created_at": "2025-11-23T00:57:05.898562Z",
+    "trigger_reason": "manual_edit",
+    "llm_metadata": null
+  }
+]

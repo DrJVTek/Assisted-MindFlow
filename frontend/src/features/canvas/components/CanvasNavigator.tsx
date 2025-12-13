@@ -16,7 +16,6 @@ export function CanvasNavigator() {
     activeCanvasId,
     isLoading,
     error,
-    fetchCanvases,
     createCanvas,
     setActiveCanvas,
     renameCanvas,

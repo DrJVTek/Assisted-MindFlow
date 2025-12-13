@@ -115,6 +115,14 @@ export const LLMDialog: React.FC<LLMDialogProps> = ({
     try {
       setIsLaunching(true);
 
+      console.log('[LLMDialog] Creating LLM operation:', {
+        nodeId,
+        graphId,
+        provider,
+        model,
+        prompt: prompt.trim().substring(0, 50)
+      });
+
       // Create operation
       const operationId = await createOperation({
         nodeId,
@@ -125,20 +133,26 @@ export const LLMDialog: React.FC<LLMDialogProps> = ({
         systemPrompt: systemPrompt.trim() || undefined
       });
 
+      console.log('[LLMDialog] Operation created:', operationId);
+
       // Start streaming
       await startStreaming(operationId);
 
+      console.log('[LLMDialog] Streaming started');
+
     } catch (error) {
-      console.error('Error launching LLM:', error);
+      console.error('[LLMDialog] Error launching LLM:', error);
       alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setIsLaunching(false);
     }
   };
 
+  console.log('[LLMDialog] Rendering with:', { isOpen, nodeId, graphId, hasGraphId: !!graphId });
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">

@@ -27,7 +27,7 @@ type Viewport = {
  */
 export function useViewport(graphId: string | null | undefined) {
   const reactFlowInstance = useReactFlow();
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load saved viewport on mount
   useEffect(() => {

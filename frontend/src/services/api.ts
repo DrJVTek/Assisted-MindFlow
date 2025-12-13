@@ -134,6 +134,21 @@ export const api = {
       tags?: string[];
       status?: string;
       position?: { x: number; y: number };
+      child_ids?: string[];
+      llm_response?: string | null;
+      llm_operation_id?: string | null;
+      font_size?: number;
+      // Feature 009: Inline LLM fields
+      llm_status?: string;
+      llm_error?: string | null;
+      prompt_height?: number;
+      response_height?: number;
+      note_top?: string | null;
+      note_bottom?: string | null;
+      collapsed?: boolean;
+      summary?: string | null;
+      node_width?: number;
+      node_height?: number;
     }
   ): Promise<any> => {
     const response = await apiClient.put(`/graphs/${graphId}/nodes/${nodeId}`, updates);

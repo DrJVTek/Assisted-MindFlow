@@ -48,14 +48,25 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   content,
   className
 }) => {
-  return (
-    <div className={className}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-      >
+  // T033: Error handling for markdown rendering failures
+  try {
+    return (
+      <div className={className}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeHighlight]}
+        >
+          {content}
+        </ReactMarkdown>
+      </div>
+    );
+  } catch (error) {
+    console.error('[MarkdownRenderer] Error rendering markdown:', error);
+    // Fallback to plain text
+    return (
+      <div className={className} style={{ whiteSpace: 'pre-wrap' }}>
         {content}
-      </ReactMarkdown>
-    </div>
-  );
+      </div>
+    );
+  }
 };

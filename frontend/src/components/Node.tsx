@@ -11,6 +11,7 @@
 
 import React, { memo, useState } from 'react';
 import { Handle, Position, NodeResizer } from 'reactflow';
+import type { ResizeParams, ResizeDragEvent } from 'reactflow';
 import {
   MessageCircleQuestion,
   MessageCircleReply,
@@ -32,6 +33,8 @@ import type { NodeType, NodeAuthor, NodeStatus } from '../types/graph';
 import { useAutoLaunchLLM } from '../hooks/useAutoLaunchLLM';
 import { LLMNodeContent } from './LLMNodeContent';
 import { api } from '../services/api';
+import { useLLMOperationsStore } from '../stores/llmOperationsStore';
+import { useStreamingContent } from '../hooks/useStreamingContent';
 
 /**
  * Node data interface (received from React Flow)
@@ -59,6 +62,16 @@ interface NodeData {
   llm_response?: string | null; // LLM response (markdown)
   llm_operation_id?: string | null; // Active operation ID
   font_size?: number; // Font size (10-24px range)
+
+  // Inline LLM workflow fields
+  llm_status?: 'idle' | 'queued' | 'streaming' | 'complete' | 'error';
+  llm_error?: string | null;
+  prompt_height?: number;
+  response_height?: number;
+  note_top?: string | null;
+  note_bottom?: string | null;
+  collapsed?: boolean;
+  summary?: string | null;
 }
 
 /**
@@ -163,6 +176,13 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     llm_response,
     llm_operation_id,
     font_size: initialFontSize,
+    // Inline LLM workflow fields
+    llm_status,
+    llm_error,
+    prompt_height,
+    response_height,
+    note_top,
+    note_bottom,
   } = data;
 
   // Feature 009 T028-T029: Local font size state
@@ -175,6 +195,94 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     isNewNode,
     content,
   });
+
+  const { createOperation } = useLLMOperationsStore();
+  const { startStreaming } = useStreamingContent(id || nodeId, { graphId: graphId || '' });
+
+  const handleContentChange = React.useCallback(async (newContent: string) => {
+    if (!graphId) return;
+    try {
+      await api.updateNode(graphId, id || nodeId, { content: newContent });
+    } catch (error) {
+      console.error('Failed to update content:', error);
+    }
+  }, [graphId, id, nodeId]);
+
+  const handleGenerateClick = React.useCallback(async (overrideContent?: string) => {
+    if (!graphId) return;
+    const contentToUse = typeof overrideContent === 'string' ? overrideContent : content;
+
+    try {
+      // Get LLM config from localStorage
+      const storedConfig = localStorage.getItem('mindflow_llm_config');
+      const llmConfig = storedConfig ? JSON.parse(storedConfig) : {
+        provider: 'ollama',
+        model: 'llama2'
+      };
+
+      // Create LLM operation
+      const operationId = await createOperation({
+        nodeId: id || nodeId,
+        graphId,
+        provider: llmConfig.provider,
+        model: llmConfig.model,
+        prompt: contentToUse,
+      });
+
+      if (operationId) {
+        // Start streaming with the operation ID
+        startStreaming(operationId);
+      }
+    } catch (error) {
+      console.error('Failed to start generation:', error);
+    }
+  }, [graphId, id, nodeId, content, createOperation, startStreaming]);
+
+  const handleHeightsChange = React.useCallback(async (pHeight: number, rHeight: number) => {
+    if (!graphId) return;
+
+    // Clamp values to backend constraints (min only)
+    const clampedPromptHeight = Math.max(100, pHeight);
+    const clampedResponseHeight = Math.max(100, rHeight);
+
+    try {
+      await api.updateNode(graphId, id || nodeId, {
+        prompt_height: Math.round(clampedPromptHeight),
+        response_height: Math.round(clampedResponseHeight)
+      });
+    } catch (error) {
+      console.error('Failed to update heights:', error);
+    }
+  }, [graphId, id, nodeId]);
+
+  const handleNoteChange = React.useCallback(async (noteTop: string | null, noteBottom: string | null) => {
+    if (!graphId) return;
+    try {
+      await api.updateNode(graphId, id || nodeId, { note_top: noteTop, note_bottom: noteBottom });
+    } catch (error) {
+      console.error('Failed to update note:', error);
+    }
+  }, [graphId, id, nodeId]);
+
+  const handleResizeEnd = React.useCallback(async (event: ResizeDragEvent, params: ResizeParams) => {
+    if (!graphId) return;
+    const { width, height } = params;
+
+    // Auto-collapse logic
+    if (width < 220) { // Threshold for collapse
+      try {
+        await api.updateNode(graphId, id || nodeId, { collapsed: true, node_width: width, node_height: height });
+      } catch (error) {
+        console.error('Failed to collapse node:', error);
+      }
+    } else {
+      try {
+        await api.updateNode(graphId, id || nodeId, { node_width: width, node_height: height });
+      } catch (error) {
+        console.error('Failed to persist dimensions:', error);
+      }
+    }
+  }, [graphId, id, nodeId]);
 
   // Feature 009 T028-T031: Font size handlers
   const increaseFontSize = () => {
@@ -212,18 +320,21 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
         borderStyle: 'solid',
         borderRadius: '8px',
         padding: '12px',
-        width: '280px',
-        minHeight: '120px',
-        maxHeight: '400px',
+        width: '100%',
+        height: '100%',
+        minWidth: '200px',
+        minHeight: '100px',
         opacity,
         boxShadow: selected
           ? '0 8px 16px rgba(0, 0, 0, 0.15)'
           : importance > 7
-          ? '0 4px 8px rgba(0, 0, 0, 0.1)'
-          : '0 2px 4px rgba(0, 0, 0, 0.05)',
+            ? '0 4px 8px rgba(0, 0, 0, 0.1)'
+            : '0 2px 4px rgba(0, 0, 0, 0.05)',
         transition: 'all 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease',
         cursor: 'move',
         fontFamily: 'system-ui, -apple-system, sans-serif',
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
       {/* Feature 009 T027: NodeResizer - only show when selected */}
@@ -231,8 +342,10 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
         <NodeResizer
           minWidth={200}
           minHeight={100}
-          maxWidth={600}
-          maxHeight={800}
+          isVisible={selected}
+          lineStyle={{ border: '1px solid #1976D2' }}
+          handleStyle={{ width: 8, height: 8, borderRadius: '50%' }}
+          onResizeEnd={handleResizeEnd}
         />
       )}
 
@@ -290,6 +403,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
               alignItems: 'center',
               justifyContent: 'space-between',
               marginBottom: '8px',
+              flexShrink: 0,
             }}
           >
             {/* Type icon + label */}
@@ -375,27 +489,29 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
             </div>
           </div>
 
-          {/* Content: LLMNodeContent or preview */}
-          {(llm_response || llm_operation_id) ? (
+          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <LLMNodeContent
-              question={content}
-              response={llm_response}
-              llmOperationId={llm_operation_id}
+              nodeId={id || nodeId}
+              graphId={graphId || ''}
+              content={content}
+              llmResponse={llm_response || null}
+              llmOperationId={llm_operation_id || null}
+              isNewNode={isNewNode}
+              llmStatus={llm_status || 'idle'}
+              llmError={llm_error || null}
+              promptHeight={prompt_height || 300}
+              responseHeight={response_height || 200}
+              noteTop={note_top || null}
+              noteBottom={note_bottom || null}
               fontSize={fontSize}
+              onContentChange={handleContentChange}
+              onGenerateClick={handleGenerateClick}
+              onStopClick={() => { }}
+              onRefreshClick={() => { }}
+              onHeightsChange={handleHeightsChange}
+              onNoteChange={handleNoteChange}
             />
-          ) : (
-            <div
-              style={{
-                fontSize: '14px',
-                lineHeight: '1.5',
-                color: '#37474F',
-                wordWrap: 'break-word',
-                overflowWrap: 'break-word',
-              }}
-            >
-              {preview}
-            </div>
-          )}
+          </div>
 
           {/* Importance indicator (bottom border) */}
           {importance > 7 && (
@@ -408,6 +524,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
                 color: '#78909C',
                 fontWeight: 600,
                 textAlign: 'right',
+                flexShrink: 0,
               }}
             >
               High Priority

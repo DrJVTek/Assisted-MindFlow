@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 from typing import Dict, List
 from pydantic import BaseModel, Field
 
-from mindflow.models.graph import Graph
+from mindflow.models.graph import Graph, GraphMetadata
 from mindflow.models.node import Node, NodeType, NodeAuthor, NodeStatus, NodeMetadata, Position
 from mindflow.models.group import Group, GroupKind, GroupMetadata
 from mindflow.models.comment import Comment, CommentTarget
@@ -69,7 +69,7 @@ def delete_graph_from_storage(graph_id: UUID) -> bool:
 class CreateNodeRequest(BaseModel):
     """Request body for creating a new node."""
     type: NodeType
-    content: str = Field(min_length=1, max_length=10000)
+    content: str = Field(default="", min_length=0, max_length=10000)
     author: NodeAuthor = "human"
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     tags: list[str] = Field(default_factory=list)
@@ -80,7 +80,7 @@ class CreateNodeRequest(BaseModel):
 
 class UpdateNodeRequest(BaseModel):
     """Request body for updating an existing node."""
-    content: str | None = Field(None, min_length=1, max_length=10000)
+    content: str | None = Field(None, min_length=0, max_length=10000)
     importance: float | None = Field(None, ge=0.0, le=1.0)
     tags: list[str] | None = None
     status: NodeStatus | None = None
@@ -88,6 +88,16 @@ class UpdateNodeRequest(BaseModel):
 
     # Feature 009: Inline LLM Response Display
     llm_response: str | None = Field(None, max_length=100000)
+    
+    # Inline LLM Workflow fields
+    llm_status: str | None = None
+    llm_error: str | None = None
+    prompt_height: int | None = Field(None, ge=100, le=600)
+    response_height: int | None = Field(None, ge=100, le=800)
+    note_top: str | None = Field(None, max_length=5000)
+    note_bottom: str | None = Field(None, max_length=5000)
+    collapsed: bool | None = None
+    summary: str | None = Field(None, max_length=100)
     llm_operation_id: UUID | None = None
     font_size: int | None = Field(None, ge=10, le=24)
     node_width: int | None = Field(None, ge=280, le=800)
@@ -110,10 +120,23 @@ async def get_graph(graph_id: str) -> Graph:
     logger.info(f"GET /api/graphs/{graph_id}")
 
     if graph_id not in _graphs_storage:
-        logger.warning(f"Graph not found: {graph_id}")
-        raise HTTPException(
-            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        logger.warning(f"Graph not found in memory: {graph_id}. Creating new empty graph for recovery.")
+        # Create a new empty graph with the requested ID to recover from restart
+        # This is a temporary fix until we implement graph persistence
+        
+        # Try to find associated canvas name if possible, otherwise use default
+        graph_name = "Recovered Graph"
+        
+        new_graph = Graph(
+            id=UUID(graph_id),
+            meta=GraphMetadata(name=graph_name),
+            nodes={},
+            groups={},
+            comments={},
+            subgraph_instances={},
         )
+        _graphs_storage[graph_id] = new_graph
+        return new_graph
 
     graph = _graphs_storage[graph_id]
     logger.info(f"Retrieved graph {graph_id} with {len(graph.nodes)} nodes")
@@ -302,6 +325,24 @@ async def update_node(
         node.node_width = update_req.node_width
     if update_req.node_height is not None:
         node.node_height = update_req.node_height
+
+    # Inline LLM Workflow fields
+    if update_req.llm_status is not None:
+        node.llm_status = update_req.llm_status
+    if update_req.llm_error is not None:
+        node.llm_error = update_req.llm_error
+    if update_req.prompt_height is not None:
+        node.prompt_height = update_req.prompt_height
+    if update_req.response_height is not None:
+        node.response_height = update_req.response_height
+    if update_req.note_top is not None:
+        node.note_top = update_req.note_top
+    if update_req.note_bottom is not None:
+        node.note_bottom = update_req.note_bottom
+    if update_req.collapsed is not None:
+        node.collapsed = update_req.collapsed
+    if update_req.summary is not None:
+        node.summary = update_req.summary
 
     # Update timestamp
     node.update_timestamp()

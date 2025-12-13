@@ -9,7 +9,7 @@
  * const reducedMotion = useReducedMotion();
  * return (
  *   <div className={reducedMotion ? '' : 'animate-spin'}>
- *     {/* Content */}
+ *     {children}
  *   </div>
  * );
  * ```
@@ -71,7 +71,7 @@ export function useReducedMotion(): boolean {
  *     className={animation.className}
  *     style={{ transition: animation.transition }}
  *   >
- *     {/* Content */}
+ *     {children}
  *   </div>
  * );
  * ```

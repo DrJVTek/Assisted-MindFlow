@@ -79,13 +79,15 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
     graphId,
     isNewNode,
     content,
-    provider = 'ollama', // Default provider (from settings in real implementation)
-    model = 'llama2', // Default model (from settings in real implementation)
+    provider: overrideProvider,
+    model: overrideModel,
     systemPrompt
   } = options;
 
   // Prevent duplicate launches on re-renders
   const hasLaunchedRef = useRef(false);
+  // Track if this is the first render (to prevent launching on isNewNode prop changes)
+  const isFirstRenderRef = useRef(true);
 
   // Get store actions
   const { createOperation } = useLLMOperationsStore();
@@ -96,11 +98,27 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
   });
 
   useEffect(() => {
-    // Skip if:
-    // - Already launched
-    // - Not a new node
-    // - Content is empty
-    if (hasLaunchedRef.current || !isNewNode || !content || content.trim() === '') {
+    // Check conditions on first render only
+    const isFirstRender = isFirstRenderRef.current;
+    const notLaunched = !hasLaunchedRef.current;
+    const hasContent = content && content.trim() !== '';
+
+    const shouldLaunch = isFirstRender &&
+      notLaunched &&
+      isNewNode &&
+      hasContent;
+
+    if (isNewNode) {
+      console.log('[useAutoLaunchLLM]', shouldLaunch ? '✅ LAUNCHING' : '❌ Skip', { isNewNode, hasContent, isFirstRender, notLaunched });
+    }
+
+    // Mark that first render has completed
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false;
+    }
+
+    // Skip if shouldn't launch
+    if (!shouldLaunch) {
       return;
     }
 
@@ -110,14 +128,29 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
     // Async auto-launch function
     const autoLaunch = async () => {
       try {
-        console.log(`[useAutoLaunchLLM] Auto-launching LLM for node ${nodeId}`);
+        // Resolve provider/model from settings if not overridden
+        let finalProvider = overrideProvider;
+        let finalModel = overrideModel;
+
+        if (!finalProvider || !finalModel) {
+          const storedConfig = localStorage.getItem('mindflow_llm_config');
+          if (storedConfig) {
+            const config = JSON.parse(storedConfig);
+            if (!finalProvider) finalProvider = config.provider;
+            if (!finalModel) finalModel = config.model;
+          }
+        }
+
+        // Fallback defaults
+        finalProvider = finalProvider || 'ollama';
+        finalModel = finalModel || 'llama2';
 
         // Create LLM operation
         const operationId = await createOperation({
           nodeId,
           graphId,
-          provider,
-          model,
+          provider: finalProvider,
+          model: finalModel,
           prompt: content,
           systemPrompt,
           metadata: {
@@ -125,8 +158,6 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
             timestamp: new Date().toISOString()
           }
         });
-
-        console.log(`[useAutoLaunchLLM] Created operation ${operationId}`);
 
         // Feature 009 T014: Update node's llm_operation_id to track active operation
         try {
@@ -138,8 +169,6 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
 
           if (!response.ok) {
             console.warn('[useAutoLaunchLLM] Failed to update node llm_operation_id:', response.statusText);
-          } else {
-            console.log(`[useAutoLaunchLLM] Updated node ${nodeId} with operation ID ${operationId}`);
           }
         } catch (updateError) {
           console.warn('[useAutoLaunchLLM] Error updating node llm_operation_id:', updateError);
@@ -147,10 +176,7 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
         }
 
         // Start streaming
-        console.log(`[useAutoLaunchLLM] Starting stream for operation ${operationId}...`);
         await startStreaming(operationId);
-
-        console.log(`[useAutoLaunchLLM] Stream started for operation ${operationId}`);
       } catch (error) {
         console.error('[useAutoLaunchLLM] Auto-launch failed:', error);
         // Reset flag on error so user can manually retry
@@ -162,5 +188,5 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
     autoLaunch();
 
     // NOTE: No cleanup needed - operation lifecycle managed by store
-  }, [nodeId, graphId, isNewNode, content, provider, model, systemPrompt, createOperation, startStreaming]);
+  }, [nodeId, graphId, isNewNode, content, overrideProvider, overrideModel, systemPrompt, createOperation, startStreaming]);
 }

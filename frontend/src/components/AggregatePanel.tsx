@@ -18,7 +18,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { X, Minimize2, Maximize2, RefreshCw, XCircle, Trash2, ChevronRight } from 'lucide-react';
+import { Minimize2, Maximize2, RefreshCw, XCircle, Trash2, ChevronRight } from 'lucide-react';
 import type { UUID } from '../types/uuid';
 import { useLLMOperationsStore } from '../stores/llmOperationsStore';
 import { StreamingIndicator } from './StreamingIndicator';

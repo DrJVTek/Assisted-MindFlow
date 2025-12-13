@@ -171,8 +171,6 @@ export function useStreamingContent(
 
             if (!response.ok) {
               console.warn('[useStreamingContent] Failed to persist llm_response:', response.statusText);
-            } else {
-              console.log(`[useStreamingContent] Persisted llm_response for node ${nodeId}`);
             }
           } catch (persistError) {
             console.error('[useStreamingContent] Error persisting llm_response:', persistError);
@@ -193,8 +191,15 @@ export function useStreamingContent(
 
       // Handle errors
       eventSource.addEventListener('error', (e: MessageEvent) => {
-        const data = JSON.parse(e.data);
-        const errorMsg = data.error || 'Unknown error';
+        let errorMsg = 'Unknown error';
+        try {
+          if (e.data) {
+            const data = JSON.parse(e.data);
+            errorMsg = data.error || 'Unknown error';
+          }
+        } catch (parseError) {
+          console.warn('Failed to parse error event data:', e.data);
+        }
 
         // Update store
         failOperation(operationId, errorMsg);
@@ -217,7 +222,6 @@ export function useStreamingContent(
 
         // Attempt reconnection if enabled
         if (autoReconnect && reconnectAttempts < maxReconnectAttempts) {
-          console.log(`Reconnecting... (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`);
           setReconnectAttempts(prev => prev + 1);
 
           // Exponential backoff
@@ -288,15 +292,23 @@ export function useStreamingContent(
   }, []);
 
   /**
-   * Cleanup on unmount
+   * Cleanup on unmount (T038: Handle node deletion during streaming)
    */
   useEffect(() => {
     return () => {
+      // Close EventSource connection
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+
+      // Clear streaming content for this node
+      if (currentOperationRef.current) {
+        clearContent(nodeId);
+        currentOperationRef.current = null;
       }
     };
-  }, []);
+  }, [nodeId, clearContent]);
 
   return {
     isStreaming,

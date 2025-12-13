@@ -98,7 +98,7 @@ class Node(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     type: NodeType
     author: NodeAuthor
-    content: str = Field(min_length=1, max_length=10000)
+    content: str = Field(default="", min_length=0, max_length=10000)
     parents: list[UUID] = Field(default_factory=list)
     children: list[UUID] = Field(default_factory=list)
     groups: list[UUID] = Field(default_factory=list)
@@ -107,6 +107,20 @@ class Node(BaseModel):
     # Feature 009: Inline LLM Response Display
     llm_response: Optional[str] = Field(None, max_length=100000)
     llm_operation_id: Optional[UUID] = None
+    
+    # Inline LLM Workflow: Dual-zone interface
+    prompt_height: int = Field(150, ge=100, le=600)  # Prompt zone height (px)
+    response_height: int = Field(250, ge=100, le=800)  # Response zone height (px)
+    llm_status: str = Field("idle")  # idle, queued, streaming, complete, error
+    llm_error: Optional[str] = None
+    note_top: Optional[str] = Field(None, max_length=5000)  # Note above prompt
+    note_bottom: Optional[str] = Field(None, max_length=5000)  # Note below response
+    
+    # Node collapse/expand
+    collapsed: bool = Field(False)  # If true, show only summary/title
+    summary: Optional[str] = Field(None, max_length=100)  # Title when collapsed
+    
+    # Node sizing (legacy, kept for backward compatibility)
     font_size: int = Field(14, ge=10, le=24)
     node_width: int = Field(400, ge=280, le=800)
     node_height: int = Field(400, ge=200, le=1200)

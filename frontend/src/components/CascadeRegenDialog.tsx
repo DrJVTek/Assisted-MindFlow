@@ -4,7 +4,7 @@
  * Shows affected nodes and confirms before regenerating the cascade.
  */
 
-import React from 'react';
+
 import type { Graph, UUID } from '../types/graph';
 import { getAffectedNodes, getAffectedNodesInfo } from '../features/llm/utils/cascade';
 

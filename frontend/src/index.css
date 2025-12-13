@@ -1,160 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-
-  /* Theme Colors - Light Mode */
+  /* Legacy variables mapped to Tailwind colors where possible, 
+     but keeping some for React Flow compatibility */
   --canvas-bg: #F5F7FA;
-  --canvas-grid: #E0E0E0;
   --node-bg: #FFFFFF;
-  --node-border: #CFD8DC;
-  --node-text: #37474F;
-  --node-text-secondary: #78909C;
-  --node-hover-shadow: rgba(0, 0, 0, 0.12);
-  --primary-color: #1976D2;
-  --primary-hover: #1565C0;
-  --panel-bg: #FFFFFF;
-  --panel-border: #E0E0E0;
-
-  /* Spacing */
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 12px;
-  --spacing-lg: 16px;
-  --spacing-xl: 24px;
-
-  /* Transitions */
-  --transition-fast: 0.15s ease;
-  --transition-normal: 0.2s ease;
-  --transition-slow: 0.3s ease;
-
-  color-scheme: light dark;
-  color: var(--node-text);
-  background-color: var(--canvas-bg);
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --node-border: #e2e8f0;
+  /* slate-200 */
+  --node-text: #334155;
+  /* slate-700 */
+  --primary-color: #0ea5e9;
+  /* sky-500 */
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  padding: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  overflow: hidden;
+/* Dark mode overrides */
+.dark {
+  --canvas-bg: #0f172a;
+  /* slate-900 */
+  --node-bg: #1e293b;
+  /* slate-800 */
+  --node-border: #334155;
+  /* slate-700 */
+  --node-text: #f8fafc;
+  /* slate-50 */
+  --primary-color: #38bdf8;
+  /* sky-400 */
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-/* Dark Mode - Applied via data-theme attribute */
-html[data-theme="dark"] {
-  --canvas-bg: #1A1A1A;
-  --canvas-grid: #2D2D2D;
-  --node-bg: #2D2D2D;
-  --node-border: #424242;
-  --node-text: #E0E0E0;
-  --node-text-secondary: #B0B0B0;
-  --node-hover-shadow: rgba(255, 255, 255, 0.1);
-  --primary-color: #42A5F5;
-  --primary-hover: #64B5F6;
-  --panel-bg: #2D2D2D;
-  --panel-border: #424242;
-}
-
-html[data-theme="dark"] body {
-  background-color: var(--canvas-bg);
-  color: var(--node-text);
-}
-
-/* Node Hover Effects */
-.mindflow-node:hover:not(.react-flow__node-selected) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 12px var(--node-hover-shadow) !important;
-  border-color: var(--primary-color) !important;
-}
-
-.mindflow-node:active {
-  transform: translateY(0);
+@layer base {
+  body {
+    @apply bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50 antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
 }
 
 /* React Flow Customization */
-.react-flow__attribution {
-  opacity: 0.3;
-  transition: opacity var(--transition-normal);
+.react-flow__node {
+  @apply shadow-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800;
 }
 
-.react-flow__attribution:hover {
-  opacity: 0.7;
-}
-
-.react-flow__minimap {
-  z-index: 5 !important;
+.react-flow__node.selected {
+  @apply ring-2 ring-sky-500 border-sky-500 shadow-md;
 }
 
 .react-flow__controls {
-  z-index: 5 !important;
+  @apply bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg rounded-lg overflow-hidden !important;
 }
 
-.react-flow__panel {
-  z-index: 10 !important;
+.react-flow__controls-button {
+  @apply border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 !important;
 }
 
-/* Spin animation for loading states */
+.react-flow__minimap {
+  @apply bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg !important;
+}
+
+/* Custom Animations */
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
   to {
     transform: rotate(360deg);
   }
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+.animate-spin-slow {
+  animation: spin 3s linear infinite;
 }

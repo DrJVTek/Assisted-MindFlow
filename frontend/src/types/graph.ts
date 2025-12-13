@@ -79,6 +79,18 @@ export interface Node {
   font_size?: number; // 10-24, default 14
   node_width?: number; // 280-800, default 400
   node_height?: number; // 200-1200, default 400
+
+  // Inline LLM workflow fields
+  llm_status?: 'idle' | 'queued' | 'streaming' | 'complete' | 'error';
+  llm_error?: string | null;
+  prompt_height?: number;
+  response_height?: number;
+  note_top?: string | null;
+  note_bottom?: string | null;
+
+  // Collapse/expand functionality
+  collapsed?: boolean; // If true, show only summary/title
+  summary?: string | null; // Title when collapsed (max 100 chars)
 }
 
 export type GroupKind = 'project' | 'cluster' | 'subgroup' | 'generated' | 'auto';

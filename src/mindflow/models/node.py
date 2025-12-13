@@ -98,7 +98,7 @@ class Node(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     type: NodeType
     author: NodeAuthor
-    content: str = Field(default="", min_length=0, max_length=10000)
+    content: str = Field(default="", min_length=1, max_length=10000)
     parents: list[UUID] = Field(default_factory=list)
     children: list[UUID] = Field(default_factory=list)
     groups: list[UUID] = Field(default_factory=list)

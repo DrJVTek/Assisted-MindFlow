@@ -25,6 +25,7 @@ from mindflow.services.operation_state import OperationStateManager
 from mindflow.providers.openai import OpenAIProvider
 from mindflow.providers.anthropic import AnthropicProvider
 from mindflow.providers.ollama import OllamaProvider
+from mindflow.providers.openai_chatgpt import OpenAIChatGPTProvider
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ state_manager = OperationStateManager()
 class CreateOperationRequest(BaseModel):
     """Request to create a new LLM operation."""
     node_id: UUID
-    provider: str = Field(pattern="^(openai|anthropic|ollama)$")
+    provider: str = Field(pattern="^(openai|openai_chatgpt|anthropic|ollama)$")
     model: str
     prompt: str
     system_prompt: Optional[str] = None
@@ -125,8 +126,9 @@ async def stream_operation(operation_id: UUID):
             # Get provider
             provider_map = {
                 "openai": OpenAIProvider,
+                "openai_chatgpt": OpenAIChatGPTProvider,
                 "anthropic": AnthropicProvider,
-                "ollama": OllamaProvider
+                "ollama": OllamaProvider,
             }
             
             ProviderClass = provider_map.get(operation.provider)

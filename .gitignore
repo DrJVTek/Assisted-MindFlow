@@ -128,4 +128,6 @@ secrets.*
 config/config.json
 data/graphs/*.json
 data/backups/*.json
+data/oauth/session.enc
+data/oauth/.salt
 NUL

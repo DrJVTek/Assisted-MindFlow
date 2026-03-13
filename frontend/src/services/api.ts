@@ -337,4 +337,58 @@ export const api = {
   },
 };
 
+  // ============================================================================
+  // AUTH METHODS (ChatGPT OAuth)
+  // ============================================================================
+
+  /**
+   * Start ChatGPT OAuth login flow
+   */
+  authLogin: async (): Promise<{
+    status: string;
+    message?: string;
+    subscription_tier?: string;
+    user_email?: string;
+  }> => {
+    const response = await apiClient.post('/auth/openai/login');
+    return response.data;
+  },
+
+  /**
+   * Get current OAuth session status
+   */
+  authGetStatus: async (): Promise<{
+    auth_method: string;
+    status: string;
+    subscription_tier?: string;
+    user_email?: string;
+    expires_at?: string;
+    needs_reauth?: boolean;
+  }> => {
+    const response = await apiClient.get('/auth/openai/status');
+    return response.data;
+  },
+
+  /**
+   * Logout from ChatGPT OAuth
+   */
+  authLogout: async (): Promise<{ status: string; message: string }> => {
+    const response = await apiClient.post('/auth/openai/logout');
+    return response.data;
+  },
+
+  /**
+   * Start device code flow (for headless environments)
+   */
+  authDeviceCode: async (): Promise<{
+    user_code: string;
+    verification_uri: string;
+    expires_in: number;
+    interval: number;
+  }> => {
+    const response = await apiClient.post('/auth/openai/device-code');
+    return response.data;
+  },
+};
+
 export default api;

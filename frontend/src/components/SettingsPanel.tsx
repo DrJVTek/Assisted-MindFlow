@@ -9,6 +9,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Moon, Sun, Grid3x3, Map, Brain, Eye, Save, TestTube } from 'lucide-react';
 import { useCanvasStore } from '../stores/canvasStore';
+import { OAuthLoginButton } from './OAuthLoginButton';
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -327,6 +328,24 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
         {activeTab === 'llm' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-lg)' }}>
+            {/* OpenAI Authentication (ChatGPT OAuth) */}
+            <div>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: 'var(--node-text)',
+                  marginBottom: 'var(--spacing-sm)',
+                }}
+              >
+                OpenAI Authentication
+              </label>
+              <OAuthLoginButton />
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--panel-border)' }} />
+
             {/* Provider Selection */}
             <div>
               <label

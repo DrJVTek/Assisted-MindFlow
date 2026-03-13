@@ -7,7 +7,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mindflow.api.routes import graphs, viewport, canvases, subgraphs, llm_operations
+from mindflow.api.routes import graphs, viewport, canvases, subgraphs, llm_operations, auth
 from mindflow.api.demo_data import create_demo_graph
 
 app = FastAPI(
@@ -34,8 +34,10 @@ else:
     # Development: Allow localhost on common ports
     allowed_origins = [
         "http://localhost:5173",  # Vite default
+        "http://localhost:5174",  # Vite fallback port
         "http://localhost:3000",  # Common React port
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
         "http://127.0.0.1:3000",
     ]
 
@@ -53,6 +55,7 @@ app.include_router(viewport.router, prefix="/api")
 app.include_router(canvases.router, prefix="/api")
 app.include_router(subgraphs.router, prefix="/api")
 app.include_router(llm_operations.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
 
 
 @app.get("/")

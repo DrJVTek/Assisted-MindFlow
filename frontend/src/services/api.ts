@@ -462,9 +462,9 @@ export const api = {
   // ── Conversation Import ──────────────────────────────────────
 
   /**
-   * List ChatGPT conversations
+   * List ChatGPT conversations with optional archive filter
    */
-  listChatGPTConversations: async (offset = 0, limit = 28): Promise<{
+  listChatGPTConversations: async (offset = 0, limit = 28, isArchived?: boolean): Promise<{
     conversations: Array<{
       id: string;
       title: string;
@@ -473,7 +473,11 @@ export const api = {
     }>;
     total: number;
   }> => {
-    const response = await apiClient.get(`/import/chatgpt/conversations?offset=${offset}&limit=${limit}`);
+    let url = `/import/chatgpt/conversations?offset=${offset}&limit=${limit}`;
+    if (isArchived !== undefined) {
+      url += `&is_archived=${isArchived}`;
+    }
+    const response = await apiClient.get(url);
     return response.data;
   },
 

@@ -22,6 +22,16 @@ class ConversationMessage(BaseModel):
     timestamp: Optional[datetime] = None
 
 
+class ProjectSummary(BaseModel):
+    """Lightweight summary for listing ChatGPT projects (folders)."""
+
+    id: str
+    name: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    conversation_count: Optional[int] = None
+
+
 class ConversationSummary(BaseModel):
     """Lightweight summary for listing conversations."""
 

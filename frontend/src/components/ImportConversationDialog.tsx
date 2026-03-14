@@ -13,8 +13,10 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Download, MessageSquare, ChevronRight, Loader2, GitBranch, ArrowLeft, User, Bot, Copy, AlertCircle, ClipboardPaste, Check } from 'lucide-react';
+import { X, Download, MessageSquare, ChevronRight, Loader2, GitBranch, ArrowLeft, User, Bot, Copy, AlertCircle, ClipboardPaste, Check, Archive } from 'lucide-react';
 import { api } from '../services/api';
+
+type ConversationFilter = 'active' | 'archived';
 
 interface ConversationSummary {
   id: string;
@@ -37,13 +39,15 @@ interface ImportConversationDialogProps {
 
 type View = 'checking' | 'setup' | 'list' | 'preview';
 
-// Console command: extracts ChatGPT session token → copies it to clipboard
-// Uses DevTools `copy()` function (works without user gesture, unlike navigator.clipboard).
+// Console command: extracts ChatGPT session token → shows it in a prompt() dialog.
+// prompt() is the most reliable cross-browser way: the text is pre-selected, user just hits Ctrl+C.
+// copy() and navigator.clipboard.writeText() are blocked by ChatGPT's page.
 // Must be run on chatgpt.com. CSP prevents direct fetch to localhost.
-const CONSOLE_COMMAND = `if(!location.hostname.includes('chatgpt.com')){console.error('%c ERREUR: Execute cette commande sur chatgpt.com ! ','background:#f44336;color:white;padding:4px 12px;border-radius:4px;font-size:14px')}else{fetch('/api/auth/session').then(r=>r.json()).then(d=>{if(!d.accessToken){console.error('%c ERREUR: Pas de token. Es-tu connecte a ChatGPT ? ','background:#f44336;color:white;padding:4px 12px;border-radius:4px;font-size:14px');return}try{copy(d.accessToken);console.log('%c Token copie ! Colle-le dans MindFlow (Ctrl+V). ','background:#10a37f;color:white;padding:4px 12px;border-radius:4px;font-size:14px')}catch(e){console.log('%c Copie le token ci-dessous et colle-le dans MindFlow : ','background:#ff9800;color:white;padding:4px 12px;border-radius:4px;font-size:14px');console.log(d.accessToken)}}).catch(()=>console.error('%c ERREUR: Impossible de recuperer la session ','background:#f44336;color:white;padding:4px 12px;border-radius:4px;font-size:14px'))}`;
+const CONSOLE_COMMAND = `if(!location.hostname.includes('chatgpt.com')){console.error('%c ERREUR: Execute cette commande sur chatgpt.com ! ','background:#f44336;color:white;padding:4px 12px;border-radius:4px;font-size:14px')}else{fetch('/api/auth/session').then(r=>r.json()).then(d=>{if(!d.accessToken){console.error('%c ERREUR: Pas de token. Es-tu connecte a ChatGPT ? ','background:#f44336;color:white;padding:4px 12px;border-radius:4px;font-size:14px');return}prompt('Token ChatGPT — Ctrl+C pour copier, puis colle dans MindFlow :',d.accessToken)}).catch(()=>console.error('%c ERREUR: Impossible de recuperer la session ','background:#f44336;color:white;padding:4px 12px;border-radius:4px;font-size:14px'))}`;
 
 export function ImportConversationDialog({ graphId, onClose, onImported }: ImportConversationDialogProps) {
   const [view, setView] = useState<View>('checking');
+  const [filter, setFilter] = useState<ConversationFilter>('active');
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -75,7 +79,7 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
         const status = await api.getChatGPTTokenStatus();
         if (status.status === 'connected') {
           setView('list');
-          loadConversations(0);
+          loadConversations(0, 'active');
         } else {
           setView('setup');
         }
@@ -85,12 +89,14 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
     })();
   }, []);
 
-  // Load conversations
-  const loadConversations = useCallback(async (newOffset: number) => {
+  // Load conversations with optional archive filter
+  const loadConversations = useCallback(async (newOffset: number, f?: ConversationFilter) => {
+    const currentFilter = f ?? filter;
     setLoading(true);
     setError(null);
     try {
-      const data = await api.listChatGPTConversations(newOffset, limit);
+      const isArchived = currentFilter === 'archived' ? true : undefined;
+      const data = await api.listChatGPTConversations(newOffset, limit, isArchived);
       setConversations(data.conversations);
       setTotal(data.total);
       setOffset(newOffset);
@@ -105,7 +111,13 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filter]);
+
+  const handleFilterChange = (f: ConversationFilter) => {
+    setFilter(f);
+    setOffset(0);
+    loadConversations(0, f);
+  };
 
   // Copy the console command to clipboard
   const handleCopyCommand = async () => {
@@ -142,7 +154,7 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
         // Short delay for the user to see success, then show conversations
         setTimeout(() => {
           setView('list');
-          loadConversations(0);
+          loadConversations(0, 'active');
         }, 800);
       } else {
         setTokenStatus('invalid');
@@ -439,14 +451,37 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
           {/* ── List ── */}
           {view === 'list' && (
             <>
+              {/* Filter tabs */}
+              <div style={{
+                display: 'flex', gap: '0', borderBottom: '1px solid var(--panel-border)',
+                background: 'var(--panel-bg-secondary)',
+              }}>
+                {([['active', 'Conversations', <MessageSquare size={13} key="a" />], ['archived', 'Archives', <Archive size={13} key="b" />]] as const).map(([key, label, icon]) => (
+                  <button
+                    key={key}
+                    onClick={() => handleFilterChange(key as ConversationFilter)}
+                    style={{
+                      flex: 1, padding: '10px', display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', gap: '6px',
+                      border: 'none', borderBottom: filter === key ? '2px solid #10a37f' : '2px solid transparent',
+                      backgroundColor: 'transparent',
+                      color: filter === key ? '#10a37f' : 'var(--node-text-muted)',
+                      cursor: 'pointer', fontSize: '13px', fontWeight: filter === key ? 600 : 400,
+                    }}
+                  >
+                    {icon} {label}
+                  </button>
+                ))}
+              </div>
+
               {loading ? (
                 <div style={{ padding: '40px', textAlign: 'center', color: 'var(--node-text-muted)' }}>
                   <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
-                  <div style={{ fontSize: '13px' }}>Chargement des conversations...</div>
+                  <div style={{ fontSize: '13px' }}>Chargement...</div>
                 </div>
               ) : conversations.length === 0 ? (
                 <div style={{ padding: '40px', textAlign: 'center', color: 'var(--node-text-muted)', fontSize: '14px' }}>
-                  Aucune conversation trouvee
+                  {filter === 'archived' ? 'Aucune conversation archivee' : 'Aucune conversation trouvee'}
                 </div>
               ) : (
                 conversations.map((conv) => (

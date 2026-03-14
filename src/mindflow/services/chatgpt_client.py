@@ -135,14 +135,23 @@ class ChatGPTClient:
             return resp.json()
 
     async def list_conversations(
-        self, offset: int = 0, limit: int = 28
+        self, offset: int = 0, limit: int = 28,
+        is_archived: Optional[bool] = None,
     ) -> tuple[list[ConversationSummary], int]:
         """List user's ChatGPT conversations.
+
+        Args:
+            offset: Pagination offset.
+            limit: Max items to return.
+            is_archived: Filter by archived status (None = active only).
 
         Returns:
             Tuple of (conversation summaries, total count)
         """
-        url = f"{CHATGPT_BACKEND}/conversations?offset={offset}&limit={limit}"
+        params = f"offset={offset}&limit={limit}"
+        if is_archived is not None:
+            params += f"&is_archived={'true' if is_archived else 'false'}"
+        url = f"{CHATGPT_BACKEND}/conversations?{params}"
         data = await self._request("GET", url)
 
         items = data.get("items", [])

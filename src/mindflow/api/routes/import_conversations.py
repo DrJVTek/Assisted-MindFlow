@@ -1,6 +1,8 @@
 """Conversation import API routes.
 
 Provides endpoints for:
+- GET  /api/import/chatgpt/projects — List ChatGPT projects (folders)
+- GET  /api/import/chatgpt/projects/{id}/conversations — List conversations in a project
 - GET  /api/import/chatgpt/conversations — List ChatGPT conversations
 - GET  /api/import/chatgpt/conversations/{id} — Preview a conversation
 - POST /api/import/chatgpt/import — Import a conversation into a graph
@@ -145,12 +147,15 @@ async def delete_access_token():
 async def list_chatgpt_conversations(
     offset: int = Query(0, ge=0),
     limit: int = Query(28, ge=1, le=100),
+    is_archived: Optional[bool] = Query(None, description="Filter by archived status"),
 ):
     """List the user's ChatGPT conversations."""
     client = _get_client()
 
     try:
-        summaries, total = await client.list_conversations(offset=offset, limit=limit)
+        summaries, total = await client.list_conversations(
+            offset=offset, limit=limit, is_archived=is_archived,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
 

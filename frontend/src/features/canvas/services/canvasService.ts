@@ -11,7 +11,7 @@ import type {
   CanvasListResponse,
 } from '../../../types/canvas';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 /**
  * List all canvases with optional filtering
@@ -130,12 +130,12 @@ export async function duplicateCanvas(
   canvasId: string,
   newName?: string
 ): Promise<Canvas> {
-  const url = new URL(`${API_BASE_URL}/api/canvases/${canvasId}/duplicate`);
+  let url = `${API_BASE_URL}/api/canvases/${canvasId}/duplicate`;
   if (newName) {
-    url.searchParams.set('new_name', newName);
+    url += `?new_name=${encodeURIComponent(newName)}`;
   }
 
-  const response = await fetch(url.toString(), {
+  const response = await fetch(url, {
     method: 'POST',
   });
 

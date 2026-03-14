@@ -35,6 +35,7 @@ import { LLMNodeContent } from './LLMNodeContent';
 import { api } from '../services/api';
 import { useLLMOperationsStore } from '../stores/llmOperationsStore';
 import { useStreamingContent } from '../hooks/useStreamingContent';
+import { useProviderStore } from '../stores/providerStore';
 
 /**
  * Node data interface (received from React Flow)
@@ -72,6 +73,12 @@ interface NodeData {
   note_bottom?: string | null;
   collapsed?: boolean;
   summary?: string | null;
+
+  // Feature 011: Provider assignment
+  provider_id?: string | null;
+
+  // Feature 011: MCP tools attached to this node
+  mcp_tools?: string[];
 }
 
 /**
@@ -183,7 +190,16 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     response_height,
     note_top,
     note_bottom,
+    // Feature 011: Provider
+    provider_id,
+    // Feature 011: MCP tools
+    mcp_tools,
   } = data;
+
+  // Feature 011: Look up provider info for badge/color
+  const provider = useProviderStore((s) =>
+    provider_id ? s.providers.find((p) => p.id === provider_id) : undefined
+  );
 
   // Feature 009 T028-T029: Local font size state
   const [fontSize, setFontSize] = useState(initialFontSize || 14);
@@ -213,21 +229,40 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     const contentToUse = typeof overrideContent === 'string' ? overrideContent : content;
 
     try {
-      // Get LLM config from localStorage
+      // Get LLM config from localStorage (fallback)
       const storedConfig = localStorage.getItem('mindflow_llm_config');
       const llmConfig = storedConfig ? JSON.parse(storedConfig) : {
         provider: 'ollama',
         model: 'llama2'
       };
 
-      // Create LLM operation
-      const operationId = await createOperation({
+      // Feature 011: Use node's assigned provider if available
+      const operationRequest: {
+        nodeId: string;
+        graphId: string;
+        provider: string;
+        model: string;
+        prompt: string;
+        provider_id?: string;
+        mcp_tools?: string[];
+      } = {
         nodeId: id || nodeId,
         graphId,
-        provider: llmConfig.provider,
-        model: llmConfig.model,
+        provider: provider ? provider.type : llmConfig.provider,
+        model: provider?.selected_model || llmConfig.model,
         prompt: contentToUse,
-      });
+      };
+
+      if (provider_id) {
+        operationRequest.provider_id = provider_id;
+      }
+
+      if (mcp_tools && mcp_tools.length > 0) {
+        operationRequest.mcp_tools = mcp_tools;
+      }
+
+      // Create LLM operation
+      const operationId = await createOperation(operationRequest);
 
       if (operationId) {
         // Start streaming with the operation ID
@@ -318,6 +353,11 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
         borderColor: selected ? '#1976D2' : borderColor,
         borderWidth: selected ? borderWidth + 2 : borderWidth,
         borderStyle: 'solid',
+        // Feature 011: Provider color accent on left border
+        ...(provider && !selected ? {
+          borderLeftColor: provider.color,
+          borderLeftWidth: Math.max(borderWidth, 3),
+        } : {}),
         borderRadius: '8px',
         padding: '12px',
         width: '100%',
@@ -421,6 +461,44 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
               >
                 {type.replace('_', ' ')}
               </span>
+              {/* Feature 011: Provider badge */}
+              {provider && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    marginLeft: '4px',
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    backgroundColor: provider.color + '20',
+                    border: `1px solid ${provider.color}40`,
+                  }}
+                  title={`Provider: ${provider.name}`}
+                >
+                  <div
+                    style={{
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      backgroundColor: provider.color,
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 500,
+                      color: provider.color,
+                      maxWidth: '60px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {provider.name}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Status badge + Author icon + Font controls */}

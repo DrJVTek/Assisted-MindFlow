@@ -151,10 +151,8 @@ export function useStreamingContent(
       // Handle completion
       eventSource.addEventListener('complete', async (e: MessageEvent) => {
         const data = JSON.parse(e.data);
-        const tokensUsed = data.tokens_used || 0;
-
         // Update store
-        completeOperation(operationId, tokensUsed);
+        completeOperation(operationId);
 
         // Feature 009 T015: Persist llm_response to backend
         if (graphId) {

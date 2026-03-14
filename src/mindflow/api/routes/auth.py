@@ -201,7 +201,13 @@ async def switch_auth_method(request: SwitchMethodRequest):
 
 @router.get("/models", response_model=ModelsResponse)
 async def get_models():
-    """Get available models for the current authentication method."""
+    """Get available models for the current authentication method.
+
+    For ChatGPT OAuth, returns known Codex models (the OAuth token
+    doesn't have access to api.openai.com/v1/models).
+    """
+    from mindflow.providers.openai_chatgpt import CHATGPT_MODELS, DEFAULT_MODEL
+
     oauth = get_oauth_service()
     token = await oauth.get_valid_token()
 
@@ -212,39 +218,17 @@ async def get_models():
             auth_method="chatgpt_oauth",
         )
 
-    try:
-        import httpx
+    # Return known ChatGPT/Codex models (OAuth tokens can't query /v1/models)
+    models = [
+        ModelInfo(id=m, name=m, available=True)
+        for m in CHATGPT_MODELS
+    ]
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                "https://api.openai.com/v1/models",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-        chat_prefixes = ("gpt-", "o1-", "o3-", "o4-", "chatgpt-")
-        models = [
-            ModelInfo(id=m["id"], name=m["id"], available=True)
-            for m in data.get("data", [])
-            if any(m["id"].startswith(p) for p in chat_prefixes)
-        ]
-        models.sort(key=lambda m: m.id)
-
-        return ModelsResponse(
-            models=models,
-            selected_model=models[0].id if models else None,
-            auth_method="chatgpt_oauth",
-        )
-
-    except Exception as exc:
-        logger.error("Failed to fetch models: %s", exc)
-        return ModelsResponse(
-            models=[],
-            selected_model=None,
-            auth_method="chatgpt_oauth",
-        )
+    return ModelsResponse(
+        models=models,
+        selected_model=DEFAULT_MODEL,
+        auth_method="chatgpt_oauth",
+    )
 
 
 @router.put("/model", response_model=SelectModelResponse)

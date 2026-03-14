@@ -104,6 +104,10 @@ class Node(BaseModel):
     groups: list[UUID] = Field(default_factory=list)
     meta: NodeMetadata = Field(default_factory=NodeMetadata)
 
+    # Feature 011: Multi-provider LLM support
+    provider_id: Optional[UUID] = None  # Reference to ProviderConfig; null = default provider
+    mcp_tools: list[str] = Field(default_factory=list)  # MCP tool names attached to this node
+
     # Feature 009: Inline LLM Response Display
     llm_response: Optional[str] = Field(None, max_length=100000)
     llm_operation_id: Optional[UUID] = None

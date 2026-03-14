@@ -53,10 +53,11 @@ export interface LLMOperation {
   queuePosition: number | null;
 
   // Configuration
-  provider: 'openai' | 'anthropic' | 'ollama';
+  provider: 'openai' | 'anthropic' | 'ollama' | string;
   model: string;
   prompt: string;
   systemPrompt?: string;
+  providerId?: string; // Feature 011: registry provider ID
 
   // Content
   contentLength: number;
@@ -77,11 +78,15 @@ export interface LLMOperation {
 export interface CreateOperationRequest {
   nodeId: UUID;
   graphId: UUID;
-  provider: 'openai' | 'anthropic' | 'ollama';
+  provider: 'openai' | 'anthropic' | 'ollama' | string;
   model: string;
   prompt: string;
   systemPrompt?: string;
   metadata?: Record<string, any>;
+  /** Feature 011: Provider registry ID for multi-provider support */
+  provider_id?: string;
+  /** Feature 011: MCP tool names to attach for tool-use */
+  mcp_tools?: string[];
 }
 
 /**
@@ -96,7 +101,7 @@ interface LLMOperationsState {
   updateStatus: (operationId: UUID, status: OperationStatus, progress?: number) => void;
   updateProgress: (operationId: UUID, progress: number) => void;
   updateContentLength: (operationId: UUID, length: number) => void;
-  completeOperation: (operationId: UUID, tokensUsed?: number) => void;
+  completeOperation: (operationId: UUID) => void;
   failOperation: (operationId: UUID, error: string) => void;
   cancelOperation: (operationId: UUID) => Promise<void>;
   removeOperation: (operationId: UUID) => void;
@@ -126,10 +131,12 @@ export const useLLMOperationsStore = create<LLMOperationsState>((set, get) => ({
           body: JSON.stringify({
             node_id: request.nodeId,
             provider: request.provider,
+            provider_id: request.provider_id || null,
             model: request.model,
             prompt: request.prompt,
             system_prompt: request.systemPrompt,
-            metadata: request.metadata || {}
+            metadata: request.metadata || {},
+            mcp_tools: request.mcp_tools || null,
           })
         }
       );
@@ -223,7 +230,7 @@ export const useLLMOperationsStore = create<LLMOperationsState>((set, get) => ({
   },
 
   // Complete operation
-  completeOperation: (operationId, _tokensUsed) => {
+  completeOperation: (operationId) => {
     set((state) => {
       const op = state.operations.get(operationId);
       if (!op) return state;

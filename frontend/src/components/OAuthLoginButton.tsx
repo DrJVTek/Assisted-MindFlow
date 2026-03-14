@@ -17,6 +17,11 @@ export function OAuthLoginButton() {
     useAuthStore();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Fetch session status on mount (restores state after page reload)
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
+
   // Poll session status every 60s when connected
   useEffect(() => {
     if (status === 'connected') {

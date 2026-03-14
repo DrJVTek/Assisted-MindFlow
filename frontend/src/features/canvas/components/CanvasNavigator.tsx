@@ -5,12 +5,17 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import { FolderOpen, Plus, Search, ChevronLeft, ChevronRight, MoreVertical } from 'lucide-react';
+import { FolderOpen, Plus, Search, ChevronLeft, ChevronRight, MoreVertical, Settings, Download } from 'lucide-react';
 import { useCanvasStore } from '../../../stores/canvasStore';
 import type { Canvas } from '../../../types/canvas';
 import './CanvasNavigator.css';
 
-export function CanvasNavigator() {
+interface CanvasNavigatorProps {
+  onSettings?: () => void;
+  onImport?: () => void;
+}
+
+export function CanvasNavigator({ onSettings, onImport }: CanvasNavigatorProps = {}) {
   const {
     canvases,
     activeCanvasId,
@@ -46,15 +51,21 @@ export function CanvasNavigator() {
 
   // Handle new canvas creation
   const handleNewCanvas = useCallback(async () => {
-    const canvasCount = canvases.length;
-    const defaultName = `Untitled Canvas ${canvasCount + 1}`;
+    // Find the next available number to avoid 409 conflicts
+    const existingNumbers = canvases
+      .map((c) => {
+        const match = c.name.match(/^Untitled Canvas (\d+)$/);
+        return match ? parseInt(match[1], 10) : 0;
+      });
+    const nextNumber = Math.max(0, ...existingNumbers) + 1;
+    const defaultName = `Untitled Canvas ${nextNumber}`;
 
     try {
       await createCanvas(defaultName);
     } catch (error) {
       console.error('Failed to create canvas:', error);
     }
-  }, [canvases.length, createCanvas]);
+  }, [canvases, createCanvas]);
 
   // Handle double-click to edit
   const handleDoubleClick = useCallback((canvas: Canvas) => {
@@ -189,6 +200,24 @@ export function CanvasNavigator() {
           >
             <Plus size={20} />
           </button>
+          {onImport && (
+            <button
+              className="icon-button"
+              onClick={onImport}
+              title="Import ChatGPT conversation"
+            >
+              <Download size={18} />
+            </button>
+          )}
+          {onSettings && (
+            <button
+              className="icon-button"
+              onClick={onSettings}
+              title="Settings"
+            >
+              <Settings size={20} />
+            </button>
+          )}
           <button
             className="icon-button collapse-toggle"
             onClick={() => setIsCollapsed(true)}

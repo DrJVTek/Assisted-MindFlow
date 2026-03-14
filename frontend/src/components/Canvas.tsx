@@ -44,6 +44,8 @@ import { CascadeRegenDialog } from './CascadeRegenDialog';
 import { VersionHistory } from './VersionHistory';
 import { LLMDialog } from './LLMDialog';
 import { AggregatePanel } from './AggregatePanel';
+import { DebateControls } from './DebateControls';
+import { ImportConversationDialog } from './ImportConversationDialog';
 import { CanvasNavigator } from '../features/canvas/components/CanvasNavigator';
 import { api } from '../services/api';
 import { useCascadeRegen } from '../features/llm/hooks/useCascadeRegen';
@@ -65,6 +67,7 @@ const nodeTypes = {
 // Node type (React Flow's internal type - not exported)
 type Node = {
   id: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 };
 
@@ -119,8 +122,13 @@ function CanvasInner() {
   const [llmDialogOpen, setLLMDialogOpen] = useState(false);
   const [llmNodeId, setLLMNodeId] = useState<string | null>(null);
 
+  // Import conversation dialog state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+
   // Local state for nodes and edges (synced with ReactFlow)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [localNodes, setLocalNodes] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [localEdges, setLocalEdges] = useState<any[]>([]);
 
   // Multi-selection state
@@ -152,9 +160,14 @@ function CanvasInner() {
     canRedo,
   } = useLayout(localNodes, localEdges, setLocalNodes, graphId);
 
-  // Apply theme to document
+  // Apply theme to document — both data-theme attribute and .dark class for Tailwind
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', preferences.theme);
+    if (preferences.theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
   }, [preferences.theme]);
 
   // Transform graph data to React Flow format with edge emphasis and zoom-based detail level
@@ -210,6 +223,12 @@ function CanvasInner() {
     return graphData.nodes[selectedNodeId] || null;
   }, [selectedNodeId, graphData]);
 
+  // Check if selected node has connected children (for debate controls)
+  const selectedNodeHasChildren = useMemo(() => {
+    if (!selectedNodeId) return false;
+    return localEdges.some(edge => edge.source === selectedNodeId);
+  }, [selectedNodeId, localEdges]);
+
   // Find node being edited from graph data
   const nodeToEdit = useMemo(() => {
     if (!nodeBeingEdited || !graphData) return null;
@@ -218,6 +237,7 @@ function CanvasInner() {
 
   // Handle viewport changes (save to localStorage with debounce)
   const onMove = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (_event: any, viewport: any) => {
       saveViewport(viewport);
       setCurrentZoom(viewport.zoom);
@@ -244,6 +264,7 @@ function CanvasInner() {
 
   // Handle node changes (drag, select, etc.) - sync with local state
   const onNodesChange = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (changes: any[]) => {
       setLocalNodes((nds) => {
         const updatedNodes = applyNodeChanges(changes, nds);
@@ -260,24 +281,22 @@ function CanvasInner() {
     []
   );
 
-  // Handle node drag (debug)
+  // Handle node drag (no-op, position tracked by ReactFlow internally)
   const onNodeDrag = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
-      console.log('Node dragging:', node.id, node.position);
+    (_event: React.MouseEvent, _node: Node) => {
+      // Intentionally empty — ReactFlow handles live position updates
     },
     []
   );
 
-  // Handle node drag end (save position)
+  // Handle node drag end (save position to backend)
   const onNodeDragStop = useCallback(
     async (_event: React.MouseEvent, node: Node) => {
-      console.log('Node drag stopped:', node.id, node.position);
+      if (!graphId || !node.position) return;
       try {
-        // Save position to backend (position is stored in meta.position)
-        // Note: The API expects position updates through the updateNode endpoint
-        // which will update node.meta.position
-        console.log(`Node ${node.id} position changed:`, node.position);
-        // TODO: Add position persistence to backend if needed
+        await api.updateNode(graphId, node.id, {
+          position: { x: node.position.x, y: node.position.y },
+        });
       } catch (error) {
         console.error('Error saving node position:', error);
       }
@@ -336,6 +355,8 @@ function CanvasInner() {
       return;
     }
 
+    if (!graphId) return;
+
     try {
       // Get the canvas position where user right-clicked
       const canvasPosition = reactFlowInstance.screenToFlowPosition({
@@ -379,6 +400,8 @@ function CanvasInner() {
       closeContextMenu();
       return;
     }
+
+    if (!graphId) return;
 
     try {
       const label = prompt('Enter group name:');
@@ -426,7 +449,7 @@ function CanvasInner() {
   }, [contextMenu, closeContextMenu]);
 
   const handleAskLLM = useCallback(async () => {
-    if (!contextMenu?.nodeId || !graphData) return;
+    if (!contextMenu?.nodeId || !graphData || !graphId) return;
 
     const node = graphData.nodes[contextMenu.nodeId];
     if (!node) return;
@@ -465,7 +488,7 @@ function CanvasInner() {
   }, [contextMenu, graphData, graphId, cancelOperation, closeContextMenu]);
 
   const handleDeleteNode = useCallback(async () => {
-    if (!contextMenu?.nodeId) return;
+    if (!contextMenu?.nodeId || !graphId) return;
 
     const nodeToDelete = graphData?.nodes[contextMenu.nodeId];
     if (!nodeToDelete) return;
@@ -517,6 +540,7 @@ function CanvasInner() {
       status: string;
       parentId?: string;
     }) => {
+      if (!graphId) return;
       try {
         console.log('Creating node via API:', nodeData);
 
@@ -588,7 +612,9 @@ function CanvasInner() {
       importance: number;
       tags: string[];
       status: string;
+      type: string;
     }) => {
+      if (!graphId) return;
       try {
         console.log('Updating node via API:', nodeId, updates);
 
@@ -619,7 +645,7 @@ function CanvasInner() {
 
   // Handle cascade regeneration confirmation
   const handleConfirmCascade = useCallback(async () => {
-    if (!pendingCascadeNodeId) return;
+    if (!pendingCascadeNodeId || !graphId) return;
 
     try {
       const result = await regenerateCascade(graphId, pendingCascadeNodeId);
@@ -654,7 +680,25 @@ function CanvasInner() {
     window.location.reload();
   }, []);
 
-  // Handle navigation to node from AggregatePanel
+  // Handle NodeEditor save
+  const handleNodeEditorSave = useCallback(async (nodeId: string, updates: {
+    type?: string;
+    status?: string;
+    collapsed?: boolean;
+    summary?: string;
+  }) => {
+    if (!graphId) return;
+    try {
+      console.log('Updating node via NodeEditor:', nodeId, updates);
+      await api.updateNode(graphId, nodeId, updates);
+      window.location.reload();
+    } catch (error) {
+      console.error('Error updating node:', error);
+      alert(`Error updating node: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [graphId]);
+
+  // Handle node from AggregatePanel
   const handleNavigateToNode = useCallback((nodeId: string) => {
     // Find node in local nodes
     const node = localNodes.find(n => n.id === nodeId);
@@ -779,25 +823,65 @@ function CanvasInner() {
           height: '100vh',
         }}
       >
-        <CanvasNavigator />
+        <CanvasNavigator onSettings={() => setSettingsPanelOpen(true)} onImport={() => setImportDialogOpen(true)} />
         <div style={{
           flex: 1,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexDirection: 'column',
-          gap: '1rem',
-          color: '#666'
+          gap: '0',
+          background: 'var(--canvas-bg)',
+          position: 'relative',
+          overflow: 'hidden',
         }}>
-          <div style={{ fontSize: '1.2rem' }}>No canvas selected</div>
-          <div>Create a new canvas or select one from the sidebar</div>
+          {/* Watermark logo */}
+          <img
+            src="/logo.png"
+            alt=""
+            draggable={false}
+            style={{
+              width: '180px',
+              height: '180px',
+              objectFit: 'contain',
+              opacity: 0.10,
+              userSelect: 'none',
+              pointerEvents: 'none',
+              filter: preferences.theme === 'dark' ? 'brightness(2.5) saturate(0.5)' : 'saturate(0.4)',
+            }}
+          />
+
+          <div style={{
+            marginTop: '12px',
+            fontSize: '20px',
+            fontWeight: 700,
+            color: 'var(--node-text)',
+            opacity: 0.10,
+            letterSpacing: '-0.5px',
+            userSelect: 'none',
+          }}>
+            MindFlow
+          </div>
+
+          <div style={{
+            marginTop: '28px',
+            color: 'var(--node-text-muted)',
+            fontSize: '14px',
+            textAlign: 'center',
+            lineHeight: 1.6,
+          }}>
+            Select a canvas or create a new one
+          </div>
         </div>
+        {settingsPanelOpen && (
+          <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
+        )}
       </div>
     );
   }
 
-  // Loading state
-  if (isLoading) {
+  // Loading state — only show when actually loading a graph, not during canvas CRUD
+  if (isLoading && graphId) {
     return (
       <div
         style={{
@@ -806,15 +890,21 @@ function CanvasInner() {
           height: '100vh',
         }}
       >
-        <CanvasNavigator />
+        <CanvasNavigator onSettings={() => setSettingsPanelOpen(true)} onImport={() => setImportDialogOpen(true)} />
         <div style={{
           flex: 1,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center'
+          justifyContent: 'center',
+          background: 'var(--canvas-bg)',
+          color: 'var(--node-text-muted)',
+          fontSize: '14px',
         }}>
-          <div>Loading graph...</div>
+          Loading canvas...
         </div>
+        {settingsPanelOpen && (
+          <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
+        )}
       </div>
     );
   }
@@ -829,18 +919,22 @@ function CanvasInner() {
           height: '100vh',
         }}
       >
-        <CanvasNavigator />
+        <CanvasNavigator onSettings={() => setSettingsPanelOpen(true)} onImport={() => setImportDialogOpen(true)} />
         <div style={{
           flex: 1,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexDirection: 'column',
-          gap: '1rem'
+          gap: '12px',
+          background: 'var(--canvas-bg)',
         }}>
-          <div style={{ color: '#d32f2f', fontSize: '1.2rem' }}>Error loading graph</div>
-          <div style={{ color: '#666' }}>{error}</div>
+          <div style={{ color: 'var(--danger-color)', fontSize: '16px', fontWeight: 600 }}>Error loading graph</div>
+          <div style={{ color: 'var(--node-text-muted)', fontSize: '14px' }}>{error}</div>
         </div>
+        {settingsPanelOpen && (
+          <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
+        )}
       </div>
     );
   }
@@ -854,7 +948,7 @@ function CanvasInner() {
       }}
     >
       {/* Canvas Navigator Sidebar */}
-      <CanvasNavigator />
+      <CanvasNavigator onSettings={() => setSettingsPanelOpen(true)} onImport={() => setImportDialogOpen(true)} />
 
       {/* Main Canvas Area */}
       <div
@@ -867,279 +961,311 @@ function CanvasInner() {
         aria-label="Interactive node canvas for reasoning graphs"
       >
         <ReactFlow
-        nodes={localNodes}
-        edges={localEdges}
-        nodeTypes={nodeTypes}
-        onNodesChange={onNodesChange}
-        onNodeClick={onNodeClick}
-        onNodeDoubleClick={onNodeDoubleClick}
-        onNodeDrag={onNodeDrag}
-        onNodeDragStop={onNodeDragStop}
-        onPaneClick={onPaneClick}
-        onDoubleClick={onDoubleClick}
-        onMove={onMove}
-        onPaneContextMenu={onPaneContextMenu}
-        onNodeContextMenu={onNodeContextMenu}
-        minZoom={MIN_ZOOM}
-        maxZoom={MAX_ZOOM}
-        defaultViewport={{ x: 0, y: 0, zoom: 1 }}
-        fitView={preferences.autoFitOnLoad}
-        // Touch & Mouse Configuration
-        panOnDrag={[1, 2]}      // Middle/right mouse button for panning (left for node drag)
-        panOnScroll={false}     // Disabled: scroll is used for zoom (better UX)
-        zoomOnScroll={true}     // Mouse wheel zoom on desktop
-        zoomOnPinch={true}      // Pinch-to-zoom on touch devices
-        zoomOnDoubleClick={false} // Disabled: node double-click opens editor
-        nodesDraggable={true}     // Enable node dragging with left mouse button
-        nodesConnectable={false}  // Disable edge creation for now
-        elementsSelectable={true} // Allow selecting elements
-        selectNodesOnDrag={false} // Don't select on drag (allows node movement)
-        // Selection Configuration
-        multiSelectionKeyCode="Shift" // Shift for multi-selection
-        selectionOnDrag={true}        // Enable selection box on Shift+drag
-        // Performance Optimizations
-        onlyRenderVisibleElements={true} // Viewport culling for large graphs
-        attributionPosition="bottom-right"
-      >
-        {/* Grid background */}
-        {preferences.gridVisible && (
-          <Background
-            variant={BackgroundVariant.Dots}
-            gap={preferences.gridSize}
-            size={1}
-            color="#90A4AE"
+          nodes={localNodes}
+          edges={localEdges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onNodeClick={onNodeClick}
+          onNodeDoubleClick={onNodeDoubleClick}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          onPaneClick={onPaneClick}
+          onDoubleClick={onDoubleClick}
+          onMove={onMove}
+          onPaneContextMenu={onPaneContextMenu}
+          onNodeContextMenu={onNodeContextMenu}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+          fitView={preferences.autoFitOnLoad}
+          // Touch & Mouse Configuration
+          panOnDrag={[1, 2]}      // Middle/right mouse button for panning (left for node drag)
+          panOnScroll={false}     // Disabled: scroll is used for zoom (better UX)
+          zoomOnScroll={true}     // Mouse wheel zoom on desktop
+          zoomOnPinch={true}      // Pinch-to-zoom on touch devices
+          zoomOnDoubleClick={false} // Disabled: node double-click opens editor
+          nodesDraggable={true}     // Enable node dragging with left mouse button
+          nodesConnectable={false}  // Disable edge creation for now
+          elementsSelectable={true} // Allow selecting elements
+          selectNodesOnDrag={false} // Don't select on drag (allows node movement)
+          // Selection Configuration
+          multiSelectionKeyCode="Shift" // Shift for multi-selection
+          selectionOnDrag={true}        // Enable selection box on Shift+drag
+          // Performance Optimizations
+          onlyRenderVisibleElements={true} // Viewport culling for large graphs
+          attributionPosition="bottom-right"
+        >
+          {/* Grid background */}
+          {preferences.gridVisible && (
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={preferences.gridSize}
+              size={1}
+              color="#90A4AE"
+            />
+          )}
+
+          {/* Zoom controls */}
+          <Controls showInteractive={false} />
+
+          {/* Minimap */}
+          {preferences.minimapVisible && (
+            <MiniMap
+              nodeColor="#1976D2"
+              maskColor="rgba(0, 0, 0, 0.1)"
+              position="bottom-right"
+              style={{ marginBottom: 50 }}
+              zoomable
+              pannable
+            />
+          )}
+
+          {/* Zoom level display */}
+          <Panel position="top-left" style={{
+            backgroundColor: 'var(--panel-bg)',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            fontSize: '14px',
+            fontWeight: 500,
+            color: 'var(--node-text)',
+          }}>
+            {formatZoomPercentage(currentZoom)}
+          </Panel>
+
+          {/* Toolbar buttons */}
+          <Panel position="top-right" style={{
+            backgroundColor: 'var(--panel-bg)',
+            padding: '8px',
+            borderRadius: '4px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            display: 'flex',
+            gap: '8px',
+          }}>
+            {/* Reorganize button */}
+            <button
+              onClick={handleReorganize}
+              disabled={isReorganizing}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: isReorganizing ? 'wait' : 'pointer',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                color: isReorganizing ? 'var(--node-text-muted)' : 'var(--node-text-secondary)',
+                opacity: isReorganizing ? 0.5 : 1,
+              }}
+              aria-label={isReorganizing ? 'Reorganizing canvas...' : 'Reorganize canvas layout'}
+              title={isReorganizing ? 'Reorganizing...' : 'Reorganize canvas layout'}
+            >
+              <RefreshCw size={20} className={isReorganizing ? 'spin' : ''} />
+            </button>
+
+            {/* Undo button */}
+            <button
+              onClick={undoReorganize}
+              disabled={!canUndo}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: canUndo ? 'pointer' : 'not-allowed',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                color: 'var(--node-text-secondary)',
+                opacity: canUndo ? 1 : 0.3,
+              }}
+              aria-label="Undo reorganization (Ctrl+Z)"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo size={20} />
+            </button>
+
+            {/* Redo button */}
+            <button
+              onClick={redoReorganize}
+              disabled={!canRedo}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: canRedo ? 'pointer' : 'not-allowed',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                color: 'var(--node-text-secondary)',
+                opacity: canRedo ? 1 : 0.3,
+              }}
+              aria-label="Redo reorganization (Ctrl+Y)"
+              title="Redo (Ctrl+Y)"
+            >
+              <Redo size={20} />
+            </button>
+
+            {/* Settings button */}
+            <button
+              onClick={() => setSettingsPanelOpen(true)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                color: 'var(--node-text-secondary)',
+              }}
+              aria-label="Open settings"
+            >
+              <Settings size={20} />
+            </button>
+          </Panel>
+        </ReactFlow>
+
+        {/* Detail Panel */}
+        {selectedNode && (
+          <Suspense fallback={<div style={{
+            position: 'fixed',
+            right: 0,
+            top: 0,
+            width: '400px',
+            height: '100vh',
+            background: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.1)',
+            zIndex: 1000,
+          }}>Loading...</div>}>
+            <DetailPanel
+              node={selectedNode}
+              onClose={() => selectNode(null)}
+              onUpdate={handleUpdateNode}
+            />
+          </Suspense>
+        )}
+
+        {/* Debate Controls - shown when selected node has children */}
+        {selectedNodeId && graphId && selectedNodeHasChildren && (
+          <div style={{
+            position: 'fixed',
+            right: selectedNode ? 410 : 10,
+            bottom: 20,
+            zIndex: 999,
+            minWidth: '200px',
+          }}>
+            <DebateControls
+              graphId={graphId}
+              nodeId={selectedNodeId}
+              hasConnectedChildren={selectedNodeHasChildren}
+            />
+          </div>
+        )}
+
+        {/* Settings Panel */}
+        {settingsPanelOpen && (
+          <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
+        )}
+
+        {/* Import Conversation Dialog */}
+        {importDialogOpen && graphId && (
+          <ImportConversationDialog
+            graphId={graphId}
+            onClose={() => setImportDialogOpen(false)}
+            onImported={(groupId, nodeCount) => {
+              console.log(`Imported ${nodeCount} nodes, group=${groupId}`);
+              // Refresh graph data to show imported nodes
+              window.location.reload();
+            }}
           />
         )}
 
-        {/* Zoom controls */}
-        <Controls showInteractive={false} />
-
-        {/* Minimap */}
-        {preferences.minimapVisible && (
-          <MiniMap
-            nodeColor="#1976D2"
-            maskColor="rgba(0, 0, 0, 0.1)"
-            position="bottom-right"
-            style={{ marginBottom: 50 }}
-            zoomable
-            pannable
+        {/* Context Menu */}
+        {contextMenu && contextMenu.visible && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            type={contextMenu.type}
+            onClose={closeContextMenu}
+            onAddNode={contextMenu.type === 'canvas' ? handleAddNode : undefined}
+            onAddComment={contextMenu.type === 'canvas' ? handleAddComment : undefined}
+            onCreateGroup={contextMenu.type === 'canvas' ? handleCreateGroup : undefined}
+            onEdit={contextMenu.type === 'node' ? handleEditNode : undefined}
+            onDelete={contextMenu.type === 'node' ? handleDeleteNode : undefined}
+            onAddChild={contextMenu.type === 'node' ? handleAddChildNode : undefined}
+            onAskLLM={contextMenu.type === 'node' ? handleAskLLM : undefined}
+            onViewHistory={contextMenu.type === 'node' ? handleViewHistory : undefined}
+            onSettings={contextMenu.type === 'canvas' ? () => setSettingsPanelOpen(true) : undefined}
+            onImportChatGPT={contextMenu.type === 'canvas' ? () => setImportDialogOpen(true) : undefined}
           />
         )}
 
-        {/* Zoom level display */}
-        <Panel position="top-left" style={{
-          backgroundColor: 'var(--panel-bg)',
-          padding: '8px 12px',
-          borderRadius: '4px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-          fontSize: '14px',
-          fontWeight: 500,
-          color: 'var(--node-text)',
-        }}>
-          {formatZoomPercentage(currentZoom)}
-        </Panel>
-
-        {/* Toolbar buttons */}
-        <Panel position="top-right" style={{
-          backgroundColor: 'var(--panel-bg)',
-          padding: '8px',
-          borderRadius: '4px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-          display: 'flex',
-          gap: '8px',
-        }}>
-          {/* Reorganize button */}
-          <button
-            onClick={handleReorganize}
-            disabled={isReorganizing}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: isReorganizing ? 'wait' : 'pointer',
-              padding: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              color: isReorganizing ? 'var(--node-text-muted)' : 'var(--node-text-secondary)',
-              opacity: isReorganizing ? 0.5 : 1,
-            }}
-            aria-label={isReorganizing ? 'Reorganizing canvas...' : 'Reorganize canvas layout'}
-            title={isReorganizing ? 'Reorganizing...' : 'Reorganize canvas layout'}
-          >
-            <RefreshCw size={20} className={isReorganizing ? 'spin' : ''} />
-          </button>
-
-          {/* Undo button */}
-          <button
-            onClick={undoReorganize}
-            disabled={!canUndo}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: canUndo ? 'pointer' : 'not-allowed',
-              padding: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              color: 'var(--node-text-secondary)',
-              opacity: canUndo ? 1 : 0.3,
-            }}
-            aria-label="Undo reorganization (Ctrl+Z)"
-            title="Undo (Ctrl+Z)"
-          >
-            <Undo size={20} />
-          </button>
-
-          {/* Redo button */}
-          <button
-            onClick={redoReorganize}
-            disabled={!canRedo}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: canRedo ? 'pointer' : 'not-allowed',
-              padding: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              color: 'var(--node-text-secondary)',
-              opacity: canRedo ? 1 : 0.3,
-            }}
-            aria-label="Redo reorganization (Ctrl+Y)"
-            title="Redo (Ctrl+Y)"
-          >
-            <Redo size={20} />
-          </button>
-
-          {/* Settings button */}
-          <button
-            onClick={() => setSettingsPanelOpen(true)}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              color: 'var(--node-text-secondary)',
-            }}
-            aria-label="Open settings"
-          >
-            <Settings size={20} />
-          </button>
-        </Panel>
-      </ReactFlow>
-
-      {/* Detail Panel (lazy loaded) */}
-      {selectedNode && (
-        <Suspense fallback={<div style={{
-          position: 'fixed',
-          top: 0,
-          right: 0,
-          width: '400px',
-          height: '100vh',
-          backgroundColor: 'white',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.1)',
-          zIndex: 1000,
-        }}>Loading...</div>}>
-          <DetailPanel
-            node={selectedNode}
-            onClose={() => selectNode(null)}
+        {/* Node Creator Modal */}
+        {nodeCreatorOpen && (
+          <NodeCreator
+            onClose={() => setNodeCreatorOpen(false)}
+            onSave={handleSaveNode}
+            parentId={nodeCreatorParentId}
           />
-        </Suspense>
-      )}
+        )}
 
-      {/* Settings Panel */}
-      {settingsPanelOpen && (
-        <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
-      )}
+        {/* Node Editor Modal */}
+        {nodeEditorOpen && nodeToEdit && (
+          <NodeEditor
+            node={nodeToEdit}
+            onClose={() => {
+              setNodeEditorOpen(false);
+              setNodeBeingEdited(null);
+            }}
+            onSave={handleNodeEditorSave}
+          />
+        )}
 
-      {/* Context Menu */}
-      {contextMenu && contextMenu.visible && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          type={contextMenu.type}
-          onClose={closeContextMenu}
-          onAddNode={contextMenu.type === 'canvas' ? handleAddNode : undefined}
-          onAddComment={contextMenu.type === 'canvas' ? handleAddComment : undefined}
-          onCreateGroup={contextMenu.type === 'canvas' ? handleCreateGroup : undefined}
-          onEdit={contextMenu.type === 'node' ? handleEditNode : undefined}
-          onDelete={contextMenu.type === 'node' ? handleDeleteNode : undefined}
-          onAddChild={contextMenu.type === 'node' ? handleAddChildNode : undefined}
-          onAskLLM={contextMenu.type === 'node' ? handleAskLLM : undefined}
-          onViewHistory={contextMenu.type === 'node' ? handleViewHistory : undefined}
-          onSettings={contextMenu.type === 'canvas' ? () => setSettingsPanelOpen(true) : undefined}
-        />
-      )}
+        {/* Cascade Regeneration Dialog */}
+        {cascadeDialogOpen && pendingCascadeNodeId && graphData && (
+          <CascadeRegenDialog
+            graph={graphData}
+            modifiedNodeId={pendingCascadeNodeId}
+            onConfirm={handleConfirmCascade}
+            onCancel={handleCancelCascade}
+            isRegenerating={isRegenerating}
+          />
+        )}
 
-      {/* Node Creator Modal */}
-      {nodeCreatorOpen && (
-        <NodeCreator
-          onClose={() => setNodeCreatorOpen(false)}
-          onSave={handleSaveNode}
-          parentId={nodeCreatorParentId}
-        />
-      )}
+        {/* Version History Panel */}
+        {versionHistoryOpen && versionHistoryNodeId && graphData && graphId && (
+          <VersionHistory
+            graphId={graphId}
+            nodeId={versionHistoryNodeId}
+            currentContent={graphData.nodes[versionHistoryNodeId]?.content || ''}
+            onClose={() => {
+              setVersionHistoryOpen(false);
+              setVersionHistoryNodeId(null);
+            }}
+            onRestore={async () => {
+              // Refresh graph data after restore
+              window.location.reload();
+            }}
+          />
+        )}
 
-      {/* Node Editor Modal */}
-      {nodeEditorOpen && nodeToEdit && (
-        <NodeEditor
-          node={nodeToEdit}
-          onClose={() => {
-            setNodeEditorOpen(false);
-            setNodeBeingEdited(null);
-          }}
-          onSave={handleUpdateNode}
-        />
-      )}
+        {/* LLM Dialog */}
+        {llmDialogOpen && llmNodeId && graphId && (
+          <LLMDialog
+            isOpen={llmDialogOpen}
+            onClose={() => setLLMDialogOpen(false)}
+            nodeId={llmNodeId}
+            graphId={graphId}
+          />
+        )}
 
-      {/* Cascade Regeneration Dialog */}
-      {cascadeDialogOpen && pendingCascadeNodeId && graphData && (
-        <CascadeRegenDialog
-          graph={graphData}
-          modifiedNodeId={pendingCascadeNodeId}
-          onConfirm={handleConfirmCascade}
-          onCancel={handleCancelCascade}
-          isRegenerating={isRegenerating}
-        />
-      )}
-
-      {/* Version History Panel */}
-      {versionHistoryOpen && versionHistoryNodeId && graphData && (
-        <VersionHistory
-          graphId={graphId}
-          nodeId={versionHistoryNodeId}
-          currentContent={graphData.nodes[versionHistoryNodeId]?.content || ''}
-          onClose={() => {
-            setVersionHistoryOpen(false);
-            setVersionHistoryNodeId(null);
-          }}
-          onRestore={async () => {
-            // Refresh graph data after restore
-            window.location.reload(); // Simple approach - reload to get latest data
-          }}
-        />
-      )}
-
-      {/* LLM Dialog */}
-      {llmDialogOpen && llmNodeId && graphId && (
-        <LLMDialog
-          isOpen={llmDialogOpen}
-          onClose={() => setLLMDialogOpen(false)}
-          nodeId={llmNodeId}
-          graphId={graphId}
-        />
-      )}
-
-      {/* Aggregate Panel - Multi-operation dashboard */}
-      {graphId && (
-        <AggregatePanel
-          graphId={graphId}
-          onNavigateToNode={handleNavigateToNode}
-          initialCollapsed={false}
-        />
-      )}
+        {/* Aggregate Panel - Multi-operation dashboard */}
+        {graphId && (
+          <AggregatePanel
+            graphId={graphId}
+            onNavigateToNode={handleNavigateToNode}
+            initialCollapsed={false}
+          />
+        )}
       </div>
     </div>
   );

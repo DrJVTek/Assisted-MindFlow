@@ -65,10 +65,13 @@ def build_authorization_url(
         "client_id": CLIENT_ID,
         "response_type": "code",
         "redirect_uri": redirect_uri,
-        "scope": "openid profile email",
+        "scope": "openid profile email offline_access",
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
         "state": state,
+        "id_token_add_organizations": "true",
+        "codex_cli_simplified_flow": "true",
+        "originator": "codex_cli_rs",
     }
     return f"{AUTH_ENDPOINT}?{urlencode(params)}"
 
@@ -141,8 +144,12 @@ class OAuthService:
             OAuthCallbackHandler.received_state = None
             OAuthCallbackHandler.error = None
 
-            # Start temporary callback server
-            server = http.server.HTTPServer(("127.0.0.1", 0), OAuthCallbackHandler)
+            # Start temporary callback server (port 1455 matches Codex CLI default)
+            try:
+                server = http.server.HTTPServer(("127.0.0.1", 1455), OAuthCallbackHandler)
+            except OSError:
+                # Port 1455 busy, fall back to any available port
+                server = http.server.HTTPServer(("127.0.0.1", 0), OAuthCallbackHandler)
             port = server.server_address[1]
             self._callback_server = server
 
@@ -338,7 +345,7 @@ class OAuthService:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     DEVICE_CODE_ENDPOINT,
-                    data={"client_id": CLIENT_ID, "scope": "openid profile email"},
+                    data={"client_id": CLIENT_ID, "scope": "openid profile email offline_access"},
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
                 response.raise_for_status()

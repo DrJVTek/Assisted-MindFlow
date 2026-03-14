@@ -7,7 +7,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mindflow.api.routes import graphs, viewport, canvases, subgraphs, llm_operations, auth
+from mindflow.api.routes import graphs, viewport, canvases, subgraphs, llm_operations, auth, import_conversations, providers, debates, mcp_connections
 from mindflow.api.demo_data import create_demo_graph
 
 app = FastAPI(
@@ -31,7 +31,7 @@ if ENV == "production":
     # Production: Restrict to specific domains
     allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
 else:
-    # Development: Allow localhost on common ports
+    # Development: Allow localhost on common ports + chatgpt.com for token capture
     allowed_origins = [
         "http://localhost:5173",  # Vite default
         "http://localhost:5174",  # Vite fallback port
@@ -39,6 +39,7 @@ else:
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://127.0.0.1:3000",
+        "https://chatgpt.com",   # ChatGPT token capture (console one-liner)
     ]
 
 app.add_middleware(
@@ -56,6 +57,10 @@ app.include_router(canvases.router, prefix="/api")
 app.include_router(subgraphs.router, prefix="/api")
 app.include_router(llm_operations.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(import_conversations.router, prefix="/api")
+app.include_router(providers.router, prefix="/api")
+app.include_router(debates.router, prefix="/api")
+app.include_router(mcp_connections.router, prefix="/api")
 
 
 @app.get("/")

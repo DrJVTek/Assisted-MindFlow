@@ -2,10 +2,7 @@
  * LLMNodeContent Styles
  *
  * Feature 009: Inline LLM Response Display - User Story 2
- *
- * T018: Split layout (question fixed, response scrollable)
- * T019: Scroll optimization
- * T021: Accessibility (prefers-reduced-motion)
+ * Uses CSS custom properties for theme support (light + dark)
  */
 
 /* Container - Vertical flexbox layout */
@@ -21,18 +18,17 @@
 /* Question Section - Fixed at top, does not scroll */
 .llm-node-question {
   flex-shrink: 0;
-  /* T018: Prevent shrinking */
   padding: 8px 12px;
-  background-color: #F5F5F5;
-  border-radius: 6px;
-  border-left: 3px solid #1976D2;
+  background-color: var(--primary-subtle);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--primary-color);
 }
 
 .llm-node-question-label {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  color: #546E7A;
+  color: var(--node-text-muted);
   letter-spacing: 0.5px;
   margin-bottom: 4px;
 }
@@ -40,7 +36,7 @@
 .llm-node-question-text {
   font-size: 13px;
   line-height: 1.4;
-  color: #263238;
+  color: var(--node-text);
   word-wrap: break-word;
   overflow-wrap: break-word;
 }
@@ -48,54 +44,25 @@
 /* Response Section - Scrollable */
 .llm-node-response {
   flex: 1;
-  /* T018: Expand to fill remaining space */
   overflow-y: auto;
-  /* T018: Scrollable when content exceeds height */
   overflow-x: hidden;
   padding: 8px 12px;
-  background-color: #FAFAFA;
-  border-radius: 6px;
+  background-color: var(--panel-bg-secondary);
+  border-radius: var(--radius-sm);
   line-height: 1.6;
-  color: #263238;
+  color: var(--node-text);
 
-  /* T019: Scroll optimization */
+  /* Scroll optimization */
   will-change: transform;
-  /* Hint browser for smooth scrolling */
   contain: paint layout;
-  /* Isolate rendering for performance */
   scroll-behavior: smooth;
-  /* Smooth scroll by default */
-
-  /* Custom scrollbar styling */
-  scrollbar-width: thin;
-  scrollbar-color: #B0BEC5 #ECEFF1;
 }
 
-/* T021: Accessibility - respect reduced motion preference */
+/* Accessibility - respect reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   .llm-node-response {
     scroll-behavior: auto;
-    /* Disable smooth scroll for users with motion sensitivity */
   }
-}
-
-/* Webkit browsers (Chrome, Safari, Edge) scrollbar */
-.llm-node-response::-webkit-scrollbar {
-  width: 8px;
-}
-
-.llm-node-response::-webkit-scrollbar-track {
-  background: #ECEFF1;
-  border-radius: 4px;
-}
-
-.llm-node-response::-webkit-scrollbar-thumb {
-  background: #B0BEC5;
-  border-radius: 4px;
-}
-
-.llm-node-response::-webkit-scrollbar-thumb:hover {
-  background: #90A4AE;
 }
 
 /* Loading State */
@@ -104,26 +71,21 @@
   align-items: center;
   gap: 12px;
   padding: 16px;
-  color: #546E7A;
+  color: var(--node-text-secondary);
 }
 
 .llm-node-loading-spinner {
   width: 20px;
   height: 20px;
-  border: 3px solid #E3F2FD;
-  border-top-color: #1976D2;
+  border: 3px solid var(--primary-subtle);
+  border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: llm-spinner-rotate 0.8s linear infinite;
 }
 
 @keyframes llm-spinner-rotate {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .llm-node-loading-text {
@@ -135,24 +97,27 @@
 .llm-node-empty {
   padding: 16px;
   text-align: center;
-  color: #78909C;
+  color: var(--node-text-muted);
   font-size: 13px;
   font-style: italic;
 }
 
 /* Markdown content adjustments within response */
 .llm-node-response .markdown-renderer {
-  /* Ensure markdown content inherits font size */
   font-size: inherit;
 }
 
 /* Code blocks within response */
 .llm-node-response pre {
   margin: 12px 0;
-  background-color: #263238;
+  background-color: #1e293b;
   border-radius: 4px;
   overflow-x: auto;
   max-width: 100%;
+}
+
+.dark .llm-node-response pre {
+  background-color: #0f172a;
 }
 
 .llm-node-response code {
@@ -181,20 +146,12 @@
   margin-top: 16px;
   margin-bottom: 8px;
   font-weight: 600;
-  color: #263238;
+  color: var(--node-text);
 }
 
-.llm-node-response h1 {
-  font-size: 1.5em;
-}
-
-.llm-node-response h2 {
-  font-size: 1.3em;
-}
-
-.llm-node-response h3 {
-  font-size: 1.1em;
-}
+.llm-node-response h1 { font-size: 1.5em; }
+.llm-node-response h2 { font-size: 1.3em; }
+.llm-node-response h3 { font-size: 1.1em; }
 
 /* Paragraphs within response */
 .llm-node-response p {
@@ -210,41 +167,28 @@
 
 .llm-node-response th,
 .llm-node-response td {
-  border: 1px solid #CFD8DC;
+  border: 1px solid var(--panel-border);
   padding: 8px;
   text-align: left;
 }
 
 .llm-node-response th {
-  background-color: #ECEFF1;
+  background-color: var(--panel-bg-secondary);
   font-weight: 600;
 }
 
 /* Links within response */
 .llm-node-response a {
-  color: #1976D2;
+  color: var(--primary-color);
   text-decoration: underline;
 }
 
 .llm-node-response a:hover {
-  color: #1565C0;
+  color: var(--primary-hover);
 }
 
 /* Prompt Textarea Scrollbar */
-.prompt-zone textarea::-webkit-scrollbar {
-  width: 8px;
-}
-
-.prompt-zone textarea::-webkit-scrollbar-track {
-  background: #ECEFF1;
-  border-radius: 4px;
-}
-
-.prompt-zone textarea::-webkit-scrollbar-thumb {
-  background: #B0BEC5;
-  border-radius: 4px;
-}
-
-.prompt-zone textarea::-webkit-scrollbar-thumb:hover {
-  background: #90A4AE;
+.prompt-zone textarea {
+  color: var(--node-text);
+  background: var(--panel-bg);
 }

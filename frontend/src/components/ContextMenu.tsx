@@ -7,7 +7,7 @@
  */
 
 import React, { useEffect, useRef } from 'react';
-import { Plus, Settings, Edit2, Trash2, GitBranch, History, MessageSquare, Layers, Bot } from 'lucide-react';
+import { Plus, Settings, Edit2, Trash2, GitBranch, History, MessageSquare, Layers, Bot, Download } from 'lucide-react';
 
 export type ContextMenuType = 'canvas' | 'node' | 'group';
 
@@ -35,6 +35,7 @@ interface ContextMenuProps {
   onViewHistory?: () => void;
   onSettings?: () => void;
   onProperties?: () => void;
+  onImportChatGPT?: () => void;
 }
 
 export function ContextMenu({
@@ -52,6 +53,7 @@ export function ContextMenu({
   onViewHistory,
   onSettings,
   onProperties,
+  onImportChatGPT,
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -128,6 +130,19 @@ export function ContextMenu({
         icon: <Layers size={16} />,
         onClick: () => {
           onCreateGroup();
+          onClose();
+        },
+        dividerAfter: true,
+      });
+    }
+
+    if (onImportChatGPT) {
+      actions.push({
+        id: 'import-chatgpt',
+        label: 'Import ChatGPT',
+        icon: <Download size={16} />,
+        onClick: () => {
+          onImportChatGPT();
           onClose();
         },
         dividerAfter: true,

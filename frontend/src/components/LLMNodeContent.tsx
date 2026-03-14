@@ -96,8 +96,6 @@ export function LLMNodeContent({
     }
   }, [llmStatus]);
 
-
-
   const [localPromptHeight, setLocalPromptHeight] = useState(promptHeight);
 
   // Sync local height when prop changes (unless dragging, but we don't track dragging here easily)
@@ -230,7 +228,6 @@ export function LLMNodeContent({
         initialTopHeight={localPromptHeight}
       />
 
-      {/* Action Buttons */}
       {/* Action Buttons */}
       <div className="flex items-center gap-2 px-3 py-2 border-y border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex-shrink-0">
         <Button

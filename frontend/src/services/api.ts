@@ -6,6 +6,22 @@
 import axios, { type AxiosInstance, type AxiosError } from 'axios';
 import type { Graph, NodeVersion } from '../types/graph';
 import type { CanvasViewport } from '../types/canvas';
+import type {
+  ProviderConfig,
+  CreateProviderRequest,
+  UpdateProviderRequest,
+  ModelInfo,
+} from '../types/provider';
+import type {
+  MCPConnection,
+  CreateMCPConnectionRequest,
+  MCPToolWithSource,
+} from '../types/mcp';
+import type {
+  DebateChain,
+  StartDebateRequest,
+  ContinueDebateRequest,
+} from '../types/debate';
 
 /**
  * API base URL - uses Vite proxy in development
@@ -149,6 +165,8 @@ export const api = {
       summary?: string | null;
       node_width?: number;
       node_height?: number;
+      // Feature 011: Multi-provider LLM
+      provider_id?: string | null;
     }
   ): Promise<any> => {
     const response = await apiClient.put(`/graphs/${graphId}/nodes/${nodeId}`, updates);
@@ -335,7 +353,6 @@ export const api = {
     );
     return response.data;
   },
-};
 
   // ============================================================================
   // AUTH METHODS (ChatGPT OAuth)
@@ -350,7 +367,7 @@ export const api = {
     subscription_tier?: string;
     user_email?: string;
   }> => {
-    const response = await apiClient.post('/auth/openai/login');
+    const response = await apiClient.post('/auth/openai/login', {}, { timeout: 130_000 });
     return response.data;
   },
 
@@ -386,7 +403,277 @@ export const api = {
     expires_in: number;
     interval: number;
   }> => {
-    const response = await apiClient.post('/auth/openai/device-code');
+    const response = await apiClient.post('/auth/openai/device-code', {}, { timeout: 600_000 });
+    return response.data;
+  },
+
+  /**
+   * Get available models for ChatGPT OAuth
+   */
+  authModels: async (): Promise<{
+    models: Array<{ id: string; name: string; available: boolean }>;
+    selected_model: string | null;
+    auth_method: string;
+  }> => {
+    const response = await apiClient.get('/auth/openai/models');
+    return response.data;
+  },
+
+  // ── ChatGPT Web Token (conversation import) ────────────────
+
+  /**
+   * Set ChatGPT web access token for conversation import
+   */
+  setChatGPTAccessToken: async (accessToken: string): Promise<{
+    has_token: boolean;
+    status: string;
+    message: string;
+  }> => {
+    const response = await apiClient.post('/import/chatgpt/access-token', {
+      access_token: accessToken,
+    });
+    return response.data;
+  },
+
+  /**
+   * Get ChatGPT web token status
+   */
+  getChatGPTTokenStatus: async (): Promise<{
+    has_token: boolean;
+    status: string;
+    message: string;
+  }> => {
+    const response = await apiClient.get('/import/chatgpt/token-status');
+    return response.data;
+  },
+
+  /**
+   * Remove ChatGPT web token
+   */
+  deleteChatGPTToken: async (): Promise<{
+    has_token: boolean;
+    status: string;
+    message: string;
+  }> => {
+    const response = await apiClient.delete('/import/chatgpt/access-token');
+    return response.data;
+  },
+
+  // ── Conversation Import ──────────────────────────────────────
+
+  /**
+   * List ChatGPT conversations
+   */
+  listChatGPTConversations: async (offset = 0, limit = 28): Promise<{
+    conversations: Array<{
+      id: string;
+      title: string;
+      created_at: string | null;
+      source: string;
+    }>;
+    total: number;
+  }> => {
+    const response = await apiClient.get(`/import/chatgpt/conversations?offset=${offset}&limit=${limit}`);
+    return response.data;
+  },
+
+  /**
+   * Preview a ChatGPT conversation before importing
+   */
+  previewChatGPTConversation: async (conversationId: string): Promise<{
+    id: string;
+    title: string;
+    source: string;
+    message_count: number;
+    messages: Array<{ role: string; content_preview: string; has_branches: boolean }>;
+  }> => {
+    const response = await apiClient.get(`/import/chatgpt/conversations/${conversationId}`);
+    return response.data;
+  },
+
+  /**
+   * Import a ChatGPT conversation into a graph
+   */
+  importChatGPTConversation: async (params: {
+    conversation_id: string;
+    graph_id: string;
+    mode?: string;
+    start_x?: number;
+    start_y?: number;
+  }): Promise<{
+    group_id: string;
+    node_count: number;
+    message: string;
+  }> => {
+    const response = await apiClient.post('/import/chatgpt/import', params);
+    return response.data;
+  },
+  // ============================================================================
+  // PROVIDER REGISTRY METHODS (Feature 011)
+  // ============================================================================
+
+  /**
+   * List all registered providers
+   */
+  listProviders: async (): Promise<{ providers: ProviderConfig[] }> => {
+    const response = await apiClient.get('/providers');
+    return response.data;
+  },
+
+  /**
+   * Register a new provider
+   */
+  createProvider: async (request: CreateProviderRequest): Promise<ProviderConfig> => {
+    const response = await apiClient.post('/providers', request);
+    return response.data;
+  },
+
+  /**
+   * Update an existing provider
+   */
+  updateProvider: async (id: string, request: UpdateProviderRequest): Promise<ProviderConfig> => {
+    const response = await apiClient.put(`/providers/${id}`, request);
+    return response.data;
+  },
+
+  /**
+   * Delete a provider
+   */
+  deleteProvider: async (id: string): Promise<{ message: string; affected_nodes: number }> => {
+    const response = await apiClient.delete(`/providers/${id}`);
+    return response.data;
+  },
+
+  /**
+   * Re-validate a provider's connection
+   */
+  validateProvider: async (id: string): Promise<{ status: string; available_models: string[] }> => {
+    const response = await apiClient.post(`/providers/${id}/validate`);
+    return response.data;
+  },
+
+  /**
+   * List available models for a provider
+   */
+  getProviderModels: async (id: string): Promise<{ models: ModelInfo[] }> => {
+    const response = await apiClient.get(`/providers/${id}/models`);
+    return response.data;
+  },
+
+  // ============================================================================
+  // DEBATE METHODS (Feature 011 - US2)
+  // ============================================================================
+
+  /**
+   * Start a new debate chain
+   */
+  startDebate: async (request: StartDebateRequest): Promise<DebateChain> => {
+    const response = await apiClient.post('/debates', request);
+    return response.data;
+  },
+
+  /**
+   * Get debate status
+   */
+  getDebate: async (debateId: string): Promise<DebateChain> => {
+    const response = await apiClient.get(`/debates/${debateId}`);
+    return response.data;
+  },
+
+  /**
+   * Continue a debate for additional rounds
+   */
+  continueDebate: async (debateId: string, request: ContinueDebateRequest): Promise<DebateChain> => {
+    const response = await apiClient.post(`/debates/${debateId}/continue`, request);
+    return response.data;
+  },
+
+  /**
+   * Stop a running debate
+   */
+  stopDebate: async (debateId: string): Promise<{ message: string; rounds_completed: number }> => {
+    const response = await apiClient.delete(`/debates/${debateId}`);
+    return response.data;
+  },
+
+  /**
+   * List debates for a graph
+   */
+  listDebates: async (graphId?: string): Promise<{ debates: DebateChain[] }> => {
+    const params = graphId ? { graph_id: graphId } : {};
+    const response = await apiClient.get('/debates', { params });
+    return response.data;
+  },
+
+  /**
+   * Generate a summary from a group of nodes
+   */
+  summarizeGroup: async (graphId: string, params: {
+    node_ids: string[];
+    provider_id: string;
+    position?: { x: number; y: number };
+  }): Promise<{ summary_node_id: string; content: string; message: string }> => {
+    const response = await apiClient.post(`/graphs/${graphId}/nodes/summarize-group`, params);
+    return response.data;
+  },
+
+  // ============================================================================
+  // MCP CLIENT METHODS (Feature 011 - US5)
+  // ============================================================================
+
+  /**
+   * List all MCP connections
+   */
+  listMCPConnections: async (): Promise<{ connections: MCPConnection[] }> => {
+    const response = await apiClient.get('/mcp-connections');
+    return response.data;
+  },
+
+  /**
+   * Add a new MCP server connection
+   */
+  addMCPConnection: async (request: CreateMCPConnectionRequest): Promise<MCPConnection> => {
+    const response = await apiClient.post('/mcp-connections', request);
+    return response.data;
+  },
+
+  /**
+   * Get MCP connection details
+   */
+  getMCPConnection: async (connectionId: string): Promise<MCPConnection> => {
+    const response = await apiClient.get(`/mcp-connections/${connectionId}`);
+    return response.data;
+  },
+
+  /**
+   * Remove an MCP connection
+   */
+  removeMCPConnection: async (connectionId: string): Promise<{ message: string }> => {
+    const response = await apiClient.delete(`/mcp-connections/${connectionId}`);
+    return response.data;
+  },
+
+  /**
+   * Refresh tools from a connected MCP server
+   */
+  refreshMCPConnection: async (connectionId: string): Promise<MCPConnection> => {
+    const response = await apiClient.post(`/mcp-connections/${connectionId}/refresh`);
+    return response.data;
+  },
+
+  /**
+   * List all available tools across all connected MCP servers
+   */
+  listMCPTools: async (): Promise<{ tools: MCPToolWithSource[] }> => {
+    const response = await apiClient.get('/mcp-connections/tools');
+    return response.data;
+  },
+
+  /**
+   * Invoke an MCP tool
+   */
+  invokeMCPTool: async (connectionId: string, toolName: string, args: Record<string, any>): Promise<{ result: string; is_error: boolean }> => {
+    const response = await apiClient.post(`/mcp-connections/${connectionId}/tools/${toolName}/invoke`, { arguments: args });
     return response.data;
   },
 };

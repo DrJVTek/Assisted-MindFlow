@@ -130,4 +130,7 @@ data/graphs/*.json
 data/backups/*.json
 data/oauth/session.enc
 data/oauth/.salt
+data/secrets/
+data/providers.json
+data/mcp_connections.json
 NUL

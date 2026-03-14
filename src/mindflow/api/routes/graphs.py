@@ -76,6 +76,8 @@ class CreateNodeRequest(BaseModel):
     status: NodeStatus = "draft"
     parent_ids: list[str] = Field(default_factory=list)
     position: Position | None = None
+    # Feature 011: Provider assignment
+    provider_id: str | None = None
 
 
 class UpdateNodeRequest(BaseModel):
@@ -102,6 +104,9 @@ class UpdateNodeRequest(BaseModel):
     font_size: int | None = Field(None, ge=10, le=24)
     node_width: int | None = Field(None, ge=280, le=800)
     node_height: int | None = Field(None, ge=200, le=1200)
+    # Feature 011: Provider assignment & MCP tools
+    provider_id: str | None = None
+    mcp_tools: list[str] | None = None
 
 
 @router.get("/{graph_id}")
@@ -245,6 +250,7 @@ async def create_node(graph_id: str, node_req: CreateNodeRequest) -> Node:
         parents=parent_uuids,
         children=[],
         meta=metadata,
+        provider_id=UUID(node_req.provider_id) if node_req.provider_id else None,
     )
 
     # Add node to graph
@@ -343,6 +349,12 @@ async def update_node(
         node.collapsed = update_req.collapsed
     if update_req.summary is not None:
         node.summary = update_req.summary
+
+    # Feature 011: Provider and MCP tools
+    if update_req.provider_id is not None:
+        node.provider_id = UUID(update_req.provider_id) if update_req.provider_id else None
+    if update_req.mcp_tools is not None:
+        node.mcp_tools = update_req.mcp_tools
 
     # Update timestamp
     node.update_timestamp()
@@ -1138,3 +1150,98 @@ async def delete_comment(graph_id: str, comment_id: str) -> None:
 
     logger.info(f"Deleted comment {comment_id} from graph {graph_id}")
     return None
+
+
+# ============================================================================
+# SUMMARIZE GROUP (Feature 011 - US2)
+# ============================================================================
+
+
+class SummarizeGroupRequest(BaseModel):
+    """Request to summarize a group of nodes."""
+    node_ids: List[str]
+    provider_id: str
+    position: dict = Field(default_factory=lambda: {"x": 0, "y": 0})
+
+
+class SummarizeGroupResponse(BaseModel):
+    summary_node_id: str
+    content: str
+    message: str
+
+
+@router.post("/{graph_id}/nodes/summarize-group", response_model=SummarizeGroupResponse, status_code=201)
+async def summarize_group(graph_id: str, request: SummarizeGroupRequest):
+    """Generate a summary node from a group of nodes using a provider.
+
+    Collects content from all specified nodes, sends to the designated
+    provider with a summarization prompt, creates a new node with the summary.
+    """
+    graph = get_graph_from_storage(UUID(graph_id))
+    if graph is None:
+        raise HTTPException(status_code=404, detail=f"Graph {graph_id} not found")
+
+    # Collect content from nodes
+    contents = []
+    for nid_str in request.node_ids:
+        nid = UUID(nid_str)
+        node = graph.nodes.get(nid)
+        if node is None:
+            raise HTTPException(status_code=404, detail=f"Node {nid_str} not found")
+        text = node.content or ""
+        if node.llm_response:
+            text += f"\n\n[Response]: {node.llm_response}"
+        contents.append(f"[Node {nid_str[:8]}]: {text}")
+
+    combined = "\n\n---\n\n".join(contents)
+
+    # Get provider and generate summary
+    from mindflow.api.routes.providers import _get_registry
+    registry = _get_registry()
+    provider_instance = registry.get_provider_instance(request.provider_id)
+    if provider_instance is None:
+        raise HTTPException(status_code=422, detail=f"Provider {request.provider_id} not available")
+
+    provider_config = registry.get_provider(request.provider_id)
+    model = provider_config.selected_model if provider_config else "default"
+
+    try:
+        summary = await provider_instance.generate(
+            prompt=f"Summarize the following conversation/discussion between multiple nodes:\n\n{combined}",
+            model=model or "default",
+            system_prompt="You are a summarizer. Provide a concise, clear summary of the key points, agreements, disagreements, and conclusions from the discussion.",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Summary generation failed: {exc}")
+
+    # Create summary node
+    pos = request.position
+    summary_node = Node(
+        type=NodeType.SUMMARY,
+        author=NodeAuthor.LLM,
+        content=f"Summary of {len(request.node_ids)} nodes",
+        parents=[UUID(nid) for nid in request.node_ids],
+        children=[],
+        meta=NodeMetadata(
+            status=NodeStatus.FINAL,
+            importance=0.8,
+            position=Position(x=pos.get("x", 0), y=pos.get("y", 0)),
+        ),
+        provider_id=UUID(request.provider_id),
+        llm_response=summary,
+        llm_status="complete",
+    )
+
+    graph.nodes[summary_node.id] = summary_node
+
+    # Add as child of source nodes
+    for nid_str in request.node_ids:
+        parent = graph.nodes.get(UUID(nid_str))
+        if parent and summary_node.id not in parent.children:
+            parent.children.append(summary_node.id)
+
+    return SummarizeGroupResponse(
+        summary_node_id=str(summary_node.id),
+        content=summary,
+        message=f"Summary generated from {len(request.node_ids)} nodes",
+    )

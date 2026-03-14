@@ -26,6 +26,8 @@ from mindflow.providers.openai import OpenAIProvider
 from mindflow.providers.anthropic import AnthropicProvider
 from mindflow.providers.ollama import OllamaProvider
 from mindflow.providers.openai_chatgpt import OpenAIChatGPTProvider
+from mindflow.api.routes.providers import _get_registry
+from mindflow.services.tool_use_service import generate_with_tools
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +45,13 @@ state_manager = OperationStateManager()
 class CreateOperationRequest(BaseModel):
     """Request to create a new LLM operation."""
     node_id: UUID
-    provider: str = Field(pattern="^(openai|openai_chatgpt|anthropic|ollama)$")
+    provider: str = Field(pattern="^(openai|openai_chatgpt|anthropic|ollama|gemini)$")
+    provider_id: Optional[str] = None  # Feature 011: resolve provider from registry
     model: str
     prompt: str
     system_prompt: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    mcp_tools: Optional[List[str]] = None  # Feature 011: list of MCP tool names to attach
 
 
 class OperationStatusResponse(BaseModel):
@@ -81,6 +85,13 @@ async def create_operation(
 ):
     """Create a new LLM operation."""
     try:
+        # Store mcp_tools and provider_id in metadata for the streaming endpoint
+        op_metadata = dict(request.metadata)
+        if request.mcp_tools:
+            op_metadata["mcp_tools"] = request.mcp_tools
+        if request.provider_id:
+            op_metadata["provider_id"] = request.provider_id
+
         operation = await state_manager.create_operation(
             node_id=request.node_id,
             graph_id=graph_id,
@@ -89,7 +100,7 @@ async def create_operation(
             model=request.model,
             prompt=request.prompt,
             system_prompt=request.system_prompt,
-            metadata=request.metadata
+            metadata=op_metadata
         )
 
         logger.info(f"Created operation {operation.id} ({operation.provider}/{operation.model})")
@@ -123,23 +134,64 @@ async def stream_operation(operation_id: UUID):
 
     async def event_generator():
         try:
-            # Get provider
-            provider_map = {
-                "openai": OpenAIProvider,
-                "openai_chatgpt": OpenAIChatGPTProvider,
-                "anthropic": AnthropicProvider,
-                "ollama": OllamaProvider,
-            }
-            
-            ProviderClass = provider_map.get(operation.provider)
-            if not ProviderClass:
-                yield f"event: error\n"
-                yield f"data: {{\"error\": \"Provider {operation.provider} not configured\"}}\n\n"
-                return
+            # Get provider — try registry first (Feature 011), fallback to legacy map
+            provider = None
+            op_provider_id = operation.metadata.get("provider_id") if operation.metadata else None
+            if op_provider_id:
+                registry = _get_registry()
+                provider = registry.get_provider_instance(op_provider_id)
 
-            provider = ProviderClass()
+            if provider is None:
+                provider_map = {
+                    "openai": OpenAIProvider,
+                    "openai_chatgpt": OpenAIChatGPTProvider,
+                    "anthropic": AnthropicProvider,
+                    "ollama": OllamaProvider,
+                }
+                ProviderClass = provider_map.get(operation.provider)
+                if not ProviderClass:
+                    yield f"event: error\n"
+                    yield f"data: {{\"error\": \"Provider {operation.provider} not configured\"}}\n\n"
+                    return
+                provider = ProviderClass()
 
-            # Update status
+            # Check for MCP tool-use
+            mcp_tool_names = operation.metadata.get("mcp_tools") if operation.metadata else None
+            if mcp_tool_names:
+                # Tool-use mode: run generate_with_tools, emit result as single chunk
+                from mindflow.api.routes.mcp_connections import _get_manager
+                manager = _get_manager()
+                all_tools = manager.get_all_tools()
+                # Filter to only requested tools
+                selected_tools = [t for t in all_tools if t["name"] in mcp_tool_names]
+
+                if selected_tools:
+                    await state_manager.update_status(operation_id, NodeState.PROCESSING)
+                    yield f"event: status\n"
+                    yield f"data: {{\"status\": \"processing\"}}\n\n"
+
+                    result = await generate_with_tools(
+                        provider_name=operation.provider,
+                        provider_instance=provider,
+                        prompt=operation.prompt,
+                        model=operation.model,
+                        mcp_tools=selected_tools,
+                        tool_executor=manager.invoke_tool,
+                        system_prompt=operation.system_prompt,
+                        metadata=operation.metadata,
+                    )
+
+                    await state_manager.append_content(operation_id, result)
+                    token_escaped = result.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+                    yield f"event: token\n"
+                    yield f"data: {{\"content\": \"{token_escaped}\"}}\n\n"
+
+                    await state_manager.complete_operation(operation_id, tokens_used=len(result.split()))
+                    yield f"event: complete\n"
+                    yield f"data: {{\"tokens_used\": {len(result.split())}}}\n\n"
+                    return
+
+            # Standard streaming (no tools)
             await state_manager.update_status(operation_id, NodeState.PROCESSING)
             yield f"event: status\n"
             yield f"data: {{\"status\": \"processing\"}}\n\n"

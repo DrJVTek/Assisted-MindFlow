@@ -9,13 +9,26 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { X, Save, Edit2 } from 'lucide-react';
+import { X, Save, Edit2, Wrench } from 'lucide-react';
 import type { Node, NodeType, NodeStatus } from '../types/graph';
+import { useProviderStore } from '../stores/providerStore';
+import { PROVIDER_TYPE_LABELS } from '../types/provider';
+import { ProviderSelector } from './ProviderSelector';
+import { MCPToolBrowser } from './MCPToolBrowser';
+import { useMCPStore } from '../stores/mcpStore';
+
+export interface NodeUpdateData {
+  type: string;
+  status: string;
+  importance: number;
+  tags: string[];
+  content: string;
+}
 
 interface DetailPanelProps {
   node: Node;
   onClose: () => void;
-  onUpdate?: (nodeId: string, updates: any) => void;
+  onUpdate?: (nodeId: string, updates: NodeUpdateData) => void;
 }
 
 const NODE_TYPES: NodeType[] = [
@@ -356,10 +369,22 @@ export function DetailPanel({ node, onClose, onUpdate }: DetailPanelProps) {
               <MetadataRow label="Created" value={formatTimestamp(node.meta.created_at)} />
               <MetadataRow label="Updated" value={formatTimestamp(node.meta.updated_at)} />
               <MetadataRow label="Author" value={node.author} />
+              <ProviderInfoRow providerId={(node as any).provider_id || null} />
               <MetadataRow label="Parents" value={`${node.parents.length}`} />
               <MetadataRow label="Children" value={`${node.children.length}`} />
             </div>
           </div>
+
+          {/* MCP Tools Section */}
+          <MCPToolsSection
+            nodeId={node.id}
+            graphId={(node as any).graph_id}
+            mcpTools={(node as any).mcp_tools || []}
+            onUpdate={onUpdate ? (tools) => {
+              // Pass mcp_tools as part of update - extending the update interface
+              (onUpdate as any)(node.id, { mcp_tools: tools });
+            } : undefined}
+          />
 
         </div>
       </div>
@@ -381,6 +406,102 @@ function MetadataRow({ label, value, monospace }: { label: string; value: string
       }}>
         {value}
       </span>
+    </div>
+  );
+}
+
+/** Feature 011: Display provider info in metadata section */
+function ProviderInfoRow({ providerId }: { providerId: string | null }) {
+  const provider = useProviderStore((s) =>
+    providerId ? s.providers.find((p) => p.id === providerId) : undefined
+  );
+
+  if (!provider) {
+    return <MetadataRow label="Provider" value="None (default)" />;
+  }
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <span style={{ fontSize: '12px', color: 'var(--text-muted, #78909C)' }}>Provider:</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <div
+          style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            backgroundColor: provider.color,
+          }}
+        />
+        <span style={{ fontSize: '12px', color: 'var(--text-primary, #37474F)' }}>
+          {provider.name}
+        </span>
+        <span style={{ fontSize: '10px', color: 'var(--text-muted, #78909C)' }}>
+          ({PROVIDER_TYPE_LABELS[provider.type]})
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Feature 011: MCP Tools section for attaching tools to nodes */
+function MCPToolsSection({
+  nodeId,
+  graphId,
+  mcpTools,
+  onUpdate,
+}: {
+  nodeId: string;
+  graphId?: string;
+  mcpTools: string[];
+  onUpdate?: (tools: string[]) => void;
+}) {
+  const { allTools, fetchAllTools } = useMCPStore();
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Only show if there are MCP connections with tools
+  useEffect(() => {
+    fetchAllTools();
+  }, [fetchAllTools]);
+
+  if (allTools.length === 0 && mcpTools.length === 0) {
+    return null;
+  }
+
+  return (
+    <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--panel-border, #e0e0e0)' }}>
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          padding: 0,
+          width: '100%',
+        }}
+      >
+        <Wrench size={14} style={{ color: 'var(--text-secondary, #546E7A)' }} />
+        <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary, #546E7A)', margin: 0, flex: 1, textAlign: 'left' }}>
+          MCP Tools
+        </h3>
+        {mcpTools.length > 0 && (
+          <span style={{ fontSize: '11px', color: 'var(--primary-color)', fontWeight: 500 }}>
+            {mcpTools.length} attached
+          </span>
+        )}
+      </button>
+
+      {isExpanded && (
+        <div style={{ marginTop: '8px' }}>
+          <MCPToolBrowser
+            selectedTools={mcpTools}
+            onSelectionChange={(tools) => onUpdate?.(tools)}
+            compact
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -27,6 +27,8 @@ dependencies = [
     "uvicorn[standard]>=0.25.0",
     "cryptography>=42.0.0",
     "httpx>=0.27.0",
+    "mcp>=1.0.0",
+    "google-generativeai>=0.8.0",
     # "pygraphviz>=1.11",  # TODO: Requires GraphViz system dependencies
 ]
 

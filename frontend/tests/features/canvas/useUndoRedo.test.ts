@@ -8,7 +8,7 @@
  * Tests for undo/redo functionality for canvas operations
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useUndoRedo } from '../../../src/features/canvas/hooks/useUndoRedo';
 
@@ -40,8 +40,8 @@ describe('useUndoRedo hook', () => {
   it('should allow registering an operation', () => {
     // Arrange
     const { result } = renderHook(() => useUndoRedo());
-    const mockUndo = vitest.fn();
-    const mockRedo = vitest.fn();
+    const mockUndo = vi.fn();
+    const mockRedo = vi.fn();
 
     // Act
     act(() => {
@@ -60,8 +60,8 @@ describe('useUndoRedo hook', () => {
   it('should call undo function when undo is called', () => {
     // Arrange
     const { result } = renderHook(() => useUndoRedo());
-    const mockUndo = vitest.fn();
-    const mockRedo = vitest.fn();
+    const mockUndo = vi.fn();
+    const mockRedo = vi.fn();
 
     act(() => {
       result.current.registerOperation({
@@ -85,8 +85,8 @@ describe('useUndoRedo hook', () => {
   it('should call redo function when redo is called', () => {
     // Arrange
     const { result } = renderHook(() => useUndoRedo());
-    const mockUndo = vitest.fn();
-    const mockRedo = vitest.fn();
+    const mockUndo = vi.fn();
+    const mockRedo = vi.fn();
 
     act(() => {
       result.current.registerOperation({
@@ -115,10 +115,10 @@ describe('useUndoRedo hook', () => {
   it('should support multiple undo operations', () => {
     // Arrange
     const { result } = renderHook(() => useUndoRedo());
-    const mockUndo1 = vitest.fn();
-    const mockRedo1 = vitest.fn();
-    const mockUndo2 = vitest.fn();
-    const mockRedo2 = vitest.fn();
+    const mockUndo1 = vi.fn();
+    const mockRedo1 = vi.fn();
+    const mockUndo2 = vi.fn();
+    const mockRedo2 = vi.fn();
 
     act(() => {
       result.current.registerOperation({
@@ -149,10 +149,10 @@ describe('useUndoRedo hook', () => {
   it('should clear redo stack when new operation is registered', () => {
     // Arrange
     const { result } = renderHook(() => useUndoRedo());
-    const mockUndo1 = vitest.fn();
-    const mockRedo1 = vitest.fn();
-    const mockUndo2 = vitest.fn();
-    const mockRedo2 = vitest.fn();
+    const mockUndo1 = vi.fn();
+    const mockRedo1 = vi.fn();
+    const mockUndo2 = vi.fn();
+    const mockRedo2 = vi.fn();
 
     act(() => {
       result.current.registerOperation({
@@ -212,11 +212,11 @@ describe('useUndoRedo hook', () => {
   it('should handle errors in undo function gracefully', () => {
     // Arrange
     const { result } = renderHook(() => useUndoRedo());
-    const mockUndo = vitest.fn(() => {
+    const mockUndo = vi.fn(() => {
       throw new Error('Undo failed');
     });
-    const mockRedo = vitest.fn();
-    const consoleErrorSpy = vitest.spyOn(console, 'error').mockImplementation(() => {});
+    const mockRedo = vi.fn();
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
 
     act(() => {
       result.current.registerOperation({
@@ -247,8 +247,8 @@ describe('useUndoRedo hook', () => {
       for (let i = 0; i < 5; i++) {
         result.current.registerOperation({
           name: `operation-${i}`,
-          undo: vitest.fn(),
-          redo: vitest.fn(),
+          undo: vi.fn(),
+          redo: vi.fn(),
         });
       }
     });

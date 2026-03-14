@@ -1,10 +1,12 @@
 /**
  * useGraphData Hook
  *
- * Fetches graph data from API and manages loading/error states
+ * Fetches graph data from API and manages loading/error states.
+ * Uses local state for loading/error to avoid conflicts with
+ * the shared canvasStore isLoading (used by canvas CRUD operations).
  */
 
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useCanvasStore } from '../../../stores/canvasStore';
 import { api } from '../../../services/api';
 
@@ -15,16 +17,16 @@ import { api } from '../../../services/api';
  */
 export function useGraphData(graphId: string | null) {
   const setGraphData = useCanvasStore((state) => state.setGraphData);
-  const setLoading = useCanvasStore((state) => state.setLoading);
-  const setError = useCanvasStore((state) => state.setError);
-
   const graphData = useCanvasStore((state) => state.graphData);
-  const isLoading = useCanvasStore((state) => state.isLoading);
-  const error = useCanvasStore((state) => state.error);
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!graphId) {
       setGraphData(null);
+      setIsLoading(false);
+      setError(null);
       return;
     }
 
@@ -35,12 +37,12 @@ export function useGraphData(graphId: string | null) {
 
     const fetchGraph = async (retries = 3) => {
       try {
-        setLoading(true);
+        setIsLoading(true);
         setError(null);
 
         const graph = await api.getGraph(graphId);
         setGraphData(graph);
-      } catch (error) {
+      } catch (err) {
         // Retry logic for network errors
         if (retries > 0) {
           console.warn(`Retrying graph fetch (${retries} attempts left)...`);
@@ -49,17 +51,16 @@ export function useGraphData(graphId: string | null) {
         }
 
         const message =
-          error instanceof Error ? error.message : 'Failed to load graph data';
+          err instanceof Error ? err.message : 'Failed to load graph data';
         setError(message);
-        console.error('Failed to fetch graph after retries:', error);
+        console.error('Failed to fetch graph after retries:', err);
       } finally {
-        setLoading(false);
+        setIsLoading(false);
       }
     };
 
     fetchGraph();
-  }, [graphId, setGraphData, setLoading, setError, graphData]);
+  }, [graphId, setGraphData, graphData]);
 
   return { graphData, isLoading, error };
 }
-

@@ -2,66 +2,215 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   Design Token System — Light Mode (default)
+   ============================================================ */
 :root {
-  /* Legacy variables mapped to Tailwind colors where possible, 
-     but keeping some for React Flow compatibility */
-  --canvas-bg: #F5F7FA;
-  --node-bg: #FFFFFF;
-  --node-border: #e2e8f0;
-  /* slate-200 */
-  --node-text: #334155;
-  /* slate-700 */
-  --primary-color: #0ea5e9;
-  /* sky-500 */
+  /* Canvas */
+  --canvas-bg: #f1f5f9;          /* slate-100 */
+
+  /* Nodes */
+  --node-bg: #ffffff;
+  --node-border: #e2e8f0;        /* slate-200 */
+  --node-text: #1e293b;          /* slate-800 */
+  --node-text-secondary: #64748b; /* slate-500 */
+  --node-text-muted: #94a3b8;    /* slate-400 */
+
+  /* Panels (sidebar, settings, detail) */
+  --panel-bg: #ffffff;
+  --panel-bg-secondary: #f8fafc; /* slate-50 */
+  --panel-border: #e2e8f0;       /* slate-200 */
+  --panel-header-bg: #f8fafc;    /* slate-50 */
+
+  /* Primary / accent */
+  --primary-color: #0ea5e9;      /* sky-500 */
+  --primary-hover: #0284c7;      /* sky-600 */
+  --primary-subtle: rgba(14, 165, 233, 0.08);
+
+  /* Danger */
+  --danger-color: #ef4444;       /* red-500 */
+  --danger-subtle: rgba(239, 68, 68, 0.08);
+
+  /* Success */
+  --success-color: #22c55e;      /* green-500 */
+  --success-subtle: rgba(34, 197, 94, 0.08);
+
+  /* Warning */
+  --warning-color: #f59e0b;      /* amber-500 */
+  --warning-subtle: rgba(245, 158, 11, 0.08);
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Scrollbar */
+  --scrollbar-thumb: #cbd5e1;     /* slate-300 */
+  --scrollbar-track: #f1f5f9;     /* slate-100 */
+
+  /* Aliases for DetailPanel compatibility */
+  --text-primary: var(--node-text);
+  --text-secondary: var(--node-text-secondary);
+  --text-muted: var(--node-text-muted);
+  --input-border: var(--panel-border);
+  --bg-secondary: var(--panel-bg-secondary);
+  --tag-bg: rgba(14, 165, 233, 0.1);
+  --tag-text: var(--primary-color);
 }
 
-/* Dark mode overrides */
+/* ============================================================
+   Design Token System — Dark Mode
+   ============================================================ */
 .dark {
-  --canvas-bg: #0f172a;
-  /* slate-900 */
-  --node-bg: #1e293b;
-  /* slate-800 */
-  --node-border: #334155;
-  /* slate-700 */
-  --node-text: #f8fafc;
-  /* slate-50 */
-  --primary-color: #38bdf8;
-  /* sky-400 */
+  /* Canvas */
+  --canvas-bg: #0c1222;
+
+  /* Nodes */
+  --node-bg: #1e293b;             /* slate-800 */
+  --node-border: #334155;         /* slate-700 */
+  --node-text: #f1f5f9;           /* slate-100 */
+  --node-text-secondary: #94a3b8; /* slate-400 */
+  --node-text-muted: #64748b;     /* slate-500 */
+
+  /* Panels */
+  --panel-bg: #1e293b;            /* slate-800 */
+  --panel-bg-secondary: #0f172a;  /* slate-900 */
+  --panel-border: #334155;        /* slate-700 */
+  --panel-header-bg: #0f172a;     /* slate-900 */
+
+  /* Primary / accent */
+  --primary-color: #38bdf8;       /* sky-400 */
+  --primary-hover: #7dd3fc;       /* sky-300 */
+  --primary-subtle: rgba(56, 189, 248, 0.10);
+
+  /* Danger */
+  --danger-color: #f87171;        /* red-400 */
+  --danger-subtle: rgba(248, 113, 113, 0.10);
+
+  /* Success */
+  --success-color: #4ade80;       /* green-400 */
+  --success-subtle: rgba(74, 222, 128, 0.10);
+
+  /* Warning */
+  --warning-color: #fbbf24;       /* amber-400 */
+  --warning-subtle: rgba(251, 191, 36, 0.10);
+
+  /* Elevation (darker shadows for dark bg) */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* Scrollbar */
+  --scrollbar-thumb: #475569;      /* slate-600 */
+  --scrollbar-track: #1e293b;      /* slate-800 */
+
+  /* Aliases for DetailPanel compatibility */
+  --text-primary: var(--node-text);
+  --text-secondary: var(--node-text-secondary);
+  --text-muted: var(--node-text-muted);
+  --input-border: var(--panel-border);
+  --bg-secondary: var(--panel-bg-secondary);
+  --tag-bg: rgba(56, 189, 248, 0.12);
+  --tag-text: var(--primary-color);
 }
 
+/* ============================================================
+   Base Styles
+   ============================================================ */
 @layer base {
   body {
-    @apply bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50 antialiased;
-    font-family: 'Inter', system-ui, sans-serif;
+    @apply antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: var(--canvas-bg);
+    color: var(--node-text);
+  }
+
+  /* Global scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    filter: brightness(0.85);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   }
 }
 
-/* React Flow Customization */
+/* ============================================================
+   React Flow Customization
+   ============================================================ */
 .react-flow__node {
-  @apply shadow-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800;
+  border: 1px solid var(--node-border);
+  border-radius: var(--radius-md);
+  background: var(--node-bg);
+  box-shadow: var(--shadow-sm);
 }
 
 .react-flow__node.selected {
-  @apply ring-2 ring-sky-500 border-sky-500 shadow-md;
+  @apply ring-2 ring-sky-500 border-sky-500;
+  box-shadow: var(--shadow-md);
 }
 
 .react-flow__controls {
-  @apply bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg rounded-lg overflow-hidden !important;
+  background: var(--panel-bg) !important;
+  border: 1px solid var(--panel-border) !important;
+  box-shadow: var(--shadow-lg) !important;
+  border-radius: var(--radius-md) !important;
+  overflow: hidden !important;
 }
 
 .react-flow__controls-button {
-  @apply border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 !important;
+  border-bottom: 1px solid var(--panel-border) !important;
+  background: var(--panel-bg) !important;
+  color: var(--node-text-secondary) !important;
+}
+.react-flow__controls-button:hover {
+  background: var(--panel-bg-secondary) !important;
+  color: var(--node-text) !important;
+}
+.react-flow__controls-button svg {
+  fill: currentColor !important;
 }
 
 .react-flow__minimap {
-  @apply bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg !important;
+  background: var(--panel-bg) !important;
+  border: 1px solid var(--panel-border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-lg) !important;
 }
 
-/* Custom Animations */
+/* ============================================================
+   Custom Animations
+   ============================================================ */
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
 .animate-spin-slow {

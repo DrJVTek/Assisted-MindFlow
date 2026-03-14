@@ -11,6 +11,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { X, AlertCircle } from 'lucide-react';
+import { ProviderSelector } from './ProviderSelector';
 
 export type NodeType =
   | 'question'
@@ -35,6 +36,7 @@ interface NodeCreatorProps {
     tags: string[];
     status: NodeStatus;
     parentId?: string;
+    provider_id?: string | null;
   }) => void;
   parentId?: string; // If creating a child node
 }
@@ -45,6 +47,7 @@ export function NodeCreator({ onClose, onSave, parentId }: NodeCreatorProps) {
   const [importance, setImportance] = useState(50);
   const [tags, setTags] = useState('');
   const [status, setStatus] = useState<NodeStatus>('draft');
+  const [providerId, setProviderId] = useState<string | null>(null);
   const [errors, setErrors] = useState<{ content?: string }>({});
 
   const validate = useCallback(() => {
@@ -77,6 +80,7 @@ export function NodeCreator({ onClose, onSave, parentId }: NodeCreatorProps) {
       tags: tagsArray,
       status,
       parentId,
+      provider_id: providerId,
     });
 
     onClose();
@@ -362,6 +366,25 @@ export function NodeCreator({ onClose, onSave, parentId }: NodeCreatorProps) {
               <option value="final">Final</option>
               <option value="experimental">Experimental</option>
             </select>
+          </div>
+
+          {/* Provider (Feature 011) */}
+          <div>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: 'var(--node-text)',
+                marginBottom: 'var(--spacing-sm)',
+              }}
+            >
+              LLM Provider
+            </label>
+            <ProviderSelector
+              selectedProviderId={providerId}
+              onProviderChange={setProviderId}
+            />
           </div>
         </div>
 

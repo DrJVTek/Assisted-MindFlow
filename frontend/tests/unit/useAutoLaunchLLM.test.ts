@@ -48,7 +48,7 @@ describe('useAutoLaunchLLM', () => {
   });
 
   it('launches LLM on mount when isNewNode=true', async () => {
-    const { result } = renderHook(() =>
+    renderHook(() =>
       useAutoLaunchLLM({
         nodeId: 'node-1',
         graphId: 'graph-1',
@@ -135,7 +135,7 @@ describe('useAutoLaunchLLM', () => {
   });
 
   it('handles createOperation errors gracefully', async () => {
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
     mockCreateOperation.mockRejectedValue(new Error('LLM service unavailable'));
 
     renderHook(() =>
@@ -157,7 +157,7 @@ describe('useAutoLaunchLLM', () => {
   });
 
   it('handles startStreaming errors gracefully', async () => {
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => { });
     mockStartStreaming.mockRejectedValue(new Error('Stream connection failed'));
 
     renderHook(() =>

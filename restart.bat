@@ -8,7 +8,8 @@ echo ================================================
 echo.
 
 echo [1/4] Killing existing backend processes...
-taskkill /F /IM python.exe /FI "WINDOWTITLE eq *uvicorn*" 2>nul
+taskkill /F /IM python.exe 2>nul
+taskkill /F /IM python3.13.exe 2>nul
 if %ERRORLEVEL% EQU 0 (
     echo   - Backend processes killed
 ) else (
@@ -17,7 +18,7 @@ if %ERRORLEVEL% EQU 0 (
 echo.
 
 echo [2/4] Killing existing frontend processes...
-taskkill /F /IM node.exe /FI "WINDOWTITLE eq *vite*" 2>nul
+taskkill /F /IM node.exe 2>nul
 if %ERRORLEVEL% EQU 0 (
     echo   - Frontend processes killed
 ) else (
@@ -26,11 +27,11 @@ if %ERRORLEVEL% EQU 0 (
 echo.
 
 REM Wait for ports to be released
-timeout /t 2 /nobreak >nul
+timeout /t 3 /nobreak >nul
 
 echo [3/4] Starting backend server...
-start "MindFlow Backend" cmd /k "cd /d "%~dp0" && venv\Scripts\python.exe -m uvicorn mindflow.api.server:app --reload --port 8000"
-echo   - Backend starting on port 8000
+start "MindFlow Backend" cmd /k "cd /d "%~dp0" && venv\Scripts\python.exe -m uvicorn mindflow.api.server:app --reload --port 8001"
+echo   - Backend starting on port 8001
 echo.
 
 REM Wait for backend to initialize
@@ -43,7 +44,7 @@ echo.
 
 echo ================================================
 echo  Servers restarted successfully!
-echo  Backend:  http://localhost:8000
+echo  Backend:  http://localhost:8001
 echo  Frontend: http://localhost:5173
 echo ================================================
 echo.

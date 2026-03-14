@@ -6,7 +6,8 @@ An AI-assisted visual reasoning engine based on graph nodes. MindFlow enables us
 
 ### Core Engine
 - **Graph-Based Reasoning**: Create directed acyclic graphs (DAGs) with typed nodes and parent-child relationships
-- **Multi-LLM Support**: Unified interface for Claude, OpenAI, Mistral, Groq, and local models (Ollama)
+- **Multi-LLM Support**: Unified interface for Claude, OpenAI, Gemini, Mistral, Groq, and local models (Ollama)
+- **Provider Registry**: Full CRUD management of LLM providers with API key storage and model selection
 - **Context-Aware AI**: Intelligent context selection strategies (Timeline, GraphNeighborhood, GroupContext, ManualOverride)
 - **Hierarchical Organization**: Organize nodes into groups and reusable projects
 - **Explicit Operations**: AI responses include both explanations and explicit graph operations in JSON format
@@ -21,10 +22,22 @@ An AI-assisted visual reasoning engine based on graph nodes. MindFlow enables us
 - **Advanced Interactions**: Drag-and-drop, multi-select, node editing, groups, and comments
 - **Version History**: Track and restore previous versions of node content
 - **Cascade Regeneration**: Automatically update downstream nodes when parent nodes change
-- **LLM Configuration**: Configure multiple LLM providers directly from the UI
+- **LLM Configuration**: Unified LLM Providers panel with full provider CRUD
 
-📖 See [specs/001-intelligent-reorganize/](specs/001-intelligent-reorganize/) for canvas reorganization documentation
-📖 See [specs/004-advanced-canvas-features/](specs/004-advanced-canvas-features/) for full canvas feature documentation
+### ChatGPT Import
+- **Conversation Import**: Import conversations from ChatGPT into MindFlow canvases
+- **Cloudflare Bypass**: Uses curl_cffi with Chrome TLS impersonation to access ChatGPT backend API
+- **Two-Step Token Flow**: Console command extracts token, user pastes into MindFlow
+
+### MCP (Model Context Protocol)
+- **MCP Client**: Connect to external MCP servers and browse available tools
+- **MCP Server**: Expose MindFlow operations as MCP tools for external AI agents
+- **Tool Browser**: Visual interface to explore and invoke MCP tools
+
+### Multi-LLM Debates
+- **Debate Engine**: Structured debates between multiple LLM providers
+- **Configurable Rounds**: Set number of rounds, participants, and debate topic
+- **Debate Controls**: UI to create, manage, and view debate results
 
 ## Requirements
 
@@ -64,15 +77,16 @@ pip install -e ".[dev]"
 ```
 
 4. Configure LLM providers:
-```bash
-# Copy example configuration
-cp config/config.example.json config/config.json
 
-# Edit config/config.json and set your API keys via environment variables:
+Providers can be managed directly from the UI (Settings > LLM Providers) or via environment variables:
+```bash
+# Set API keys via environment variables:
 # - ANTHROPIC_API_KEY for Claude
 # - OPENAI_API_KEY for OpenAI
+# - GOOGLE_API_KEY for Gemini
 # - MISTRAL_API_KEY for Mistral
 # - GROQ_API_KEY for Groq
+# - Ollama runs locally, no key needed
 ```
 
 ### Frontend Setup
@@ -179,7 +193,8 @@ Assisted MindFlow/
 │  └─ backups/           # Graph backups
 ├─ specs/                # Feature specifications
 │  ├─ 001-intelligent-reorganize/  # Canvas reorganization
-│  └─ 004-advanced-canvas-features/ # Full canvas features
+│  ├─ 004-advanced-canvas-features/ # Full canvas features
+│  └─ 011-multi-provider-llm-mcp/  # Multi-provider, MCP, debates
 ├─ workbench/            # TEMPORARY: test data, experiments (git-ignored)
 ├─ restart.bat/sh        # Quick server restart scripts
 ├─ .gitignore            # Git ignore rules

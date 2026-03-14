@@ -355,12 +355,10 @@ export const api = {
   },
 
   // ============================================================================
-  // AUTH METHODS (ChatGPT OAuth)
+  // AUTH METHODS (DEPRECATED — use provider OAuth methods below)
   // ============================================================================
 
-  /**
-   * Start ChatGPT OAuth login flow
-   */
+  /** @deprecated Use providerOAuthLogin instead */
   authLogin: async (): Promise<{
     status: string;
     message?: string;
@@ -371,9 +369,7 @@ export const api = {
     return response.data;
   },
 
-  /**
-   * Get current OAuth session status
-   */
+  /** @deprecated Use providerOAuthStatus instead */
   authGetStatus: async (): Promise<{
     auth_method: string;
     status: string;
@@ -386,17 +382,13 @@ export const api = {
     return response.data;
   },
 
-  /**
-   * Logout from ChatGPT OAuth
-   */
+  /** @deprecated Use providerOAuthLogout instead */
   authLogout: async (): Promise<{ status: string; message: string }> => {
     const response = await apiClient.post('/auth/openai/logout');
     return response.data;
   },
 
-  /**
-   * Start device code flow (for headless environments)
-   */
+  /** @deprecated Use providerOAuthDeviceCode instead */
   authDeviceCode: async (): Promise<{
     user_code: string;
     verification_uri: string;
@@ -407,9 +399,7 @@ export const api = {
     return response.data;
   },
 
-  /**
-   * Get available models for ChatGPT OAuth
-   */
+  /** @deprecated Use getProviderModels instead */
   authModels: async (): Promise<{
     models: Array<{ id: string; name: string; available: boolean }>;
     selected_model: string | null;
@@ -561,6 +551,56 @@ export const api = {
    */
   getProviderModels: async (id: string): Promise<{ models: ModelInfo[] }> => {
     const response = await apiClient.get(`/providers/${id}/models`);
+    return response.data;
+  },
+
+  // ── Provider OAuth Methods ────────────────────────────────────
+
+  /**
+   * Start OAuth login flow for a provider
+   */
+  providerOAuthLogin: async (providerId: string): Promise<{
+    status: string;
+    message?: string;
+    user_email?: string;
+    subscription_tier?: string;
+  }> => {
+    const response = await apiClient.post(`/providers/${providerId}/oauth/login`, {}, { timeout: 130_000 });
+    return response.data;
+  },
+
+  /**
+   * Get OAuth session status for a provider
+   */
+  providerOAuthStatus: async (providerId: string): Promise<{
+    status: string;
+    user_email?: string;
+    subscription_tier?: string;
+    expires_at?: string;
+    needs_reauth?: boolean;
+  }> => {
+    const response = await apiClient.get(`/providers/${providerId}/oauth/status`);
+    return response.data;
+  },
+
+  /**
+   * Logout OAuth session for a provider
+   */
+  providerOAuthLogout: async (providerId: string): Promise<{ status: string; message: string }> => {
+    const response = await apiClient.post(`/providers/${providerId}/oauth/logout`);
+    return response.data;
+  },
+
+  /**
+   * Start device code OAuth flow for a provider
+   */
+  providerOAuthDeviceCode: async (providerId: string): Promise<{
+    user_code: string;
+    verification_uri: string;
+    expires_in: number;
+    interval: number;
+  }> => {
+    const response = await apiClient.post(`/providers/${providerId}/oauth/device-code`, {}, { timeout: 600_000 });
     return response.data;
   },
 

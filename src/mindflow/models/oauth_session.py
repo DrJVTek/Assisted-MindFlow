@@ -10,8 +10,9 @@ from pydantic import BaseModel, Field
 
 
 class OAuthSession(BaseModel):
-    """Represents an active ChatGPT OAuth session."""
+    """Represents an active OAuth session for any provider."""
 
+    provider_id: Optional[str] = Field(default=None, description="Associated provider ID")
     access_token: str = Field(..., description="OAuth Bearer access token")
     refresh_token: str = Field(..., description="OAuth refresh token")
     expires_at: datetime = Field(..., description="Token expiry timestamp (UTC)")
@@ -20,7 +21,7 @@ class OAuthSession(BaseModel):
         default=None,
         description="Detected subscription level: free, plus, pro, business, enterprise",
     )
-    user_email: Optional[str] = Field(default=None, description="OpenAI account email (display only)")
+    user_email: Optional[str] = Field(default=None, description="Account email (display only)")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the session was first created",

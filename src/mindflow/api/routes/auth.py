@@ -1,12 +1,13 @@
-"""Authentication API routes for ChatGPT OAuth.
+"""DEPRECATED: Authentication API routes for ChatGPT OAuth.
 
-Provides endpoints for:
-- POST /api/auth/openai/login — Start OAuth browser flow
-- GET  /api/auth/openai/status — Get session status
-- POST /api/auth/openai/logout — Clear session
-- PUT  /api/auth/openai/method — Switch auth method
-- GET  /api/auth/openai/models — List available models
-- PUT  /api/auth/openai/model — Select model
+These routes are deprecated in favor of the unified provider OAuth routes:
+  POST /api/providers/{id}/oauth/login
+  GET  /api/providers/{id}/oauth/status
+  POST /api/providers/{id}/oauth/logout
+  POST /api/providers/{id}/oauth/device-code
+
+These wrappers delegate to the first CHATGPT_WEB provider for backward compatibility.
+They will be removed in a future release.
 """
 
 import logging
@@ -15,28 +16,25 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from mindflow.services.oauth_service import OAuthService
-from mindflow.services.token_storage import TokenStorage
-
-VALID_AUTH_METHODS = {"api_key", "chatgpt_oauth"}
+from mindflow.models.provider import AuthMethod, ProviderType
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth/openai", tags=["auth"])
-
-# Singleton service instances
-_token_storage = TokenStorage()
-_oauth_service = OAuthService(_token_storage)
+router = APIRouter(prefix="/auth/openai", tags=["auth (deprecated)"])
 
 
-def get_oauth_service() -> OAuthService:
-    """Get the OAuth service singleton."""
-    return _oauth_service
+def _find_chatgpt_provider_id() -> Optional[str]:
+    """Find the first CHATGPT_WEB provider with OAuth auth."""
+    from mindflow.api.routes.providers import _get_registry
+
+    registry = _get_registry()
+    for p in registry.list_providers():
+        if p.type == ProviderType.CHATGPT_WEB and p.auth_method == AuthMethod.OAUTH:
+            return str(p.id)
+    return None
 
 
-# ============================================================================
-# Response Models
-# ============================================================================
+# ── Response Models (kept for backward compat) ──────────────────
 
 
 class LoginResponse(BaseModel):
@@ -99,47 +97,49 @@ class DeviceCodeResponse(BaseModel):
     interval: int
 
 
-# ============================================================================
-# Endpoints
-# ============================================================================
+# ── Deprecated Endpoints ────────────────────────────────────────
 
 
-@router.post("/login", response_model=LoginResponse)
+@router.post("/login", response_model=LoginResponse, deprecated=True)
 async def login():
-    """Start the ChatGPT OAuth browser-based login flow."""
-    oauth = get_oauth_service()
+    """DEPRECATED: Use POST /api/providers/{id}/oauth/login instead."""
+    logger.warning("Deprecated endpoint /auth/openai/login called")
+    from mindflow.api.routes.providers import _get_registry
 
-    if oauth.flow_in_progress:
-        raise HTTPException(status_code=409, detail="Login flow already in progress")
+    pid = _find_chatgpt_provider_id()
+    if not pid:
+        raise HTTPException(status_code=404, detail="No ChatGPT provider registered. Create one first via POST /api/providers.")
 
-    # Return immediately, the flow runs in the background
-    # For the synchronous callback approach, we run it and return the result
-    result = await oauth.start_login_flow()
+    registry = _get_registry()
+    result = await registry.start_oauth_login(pid)
 
-    if result["status"] == "connected":
+    if result.get("status") == "connected":
         return LoginResponse(
             status="connected",
             message="Authentication successful.",
             subscription_tier=result.get("subscription_tier"),
             user_email=result.get("user_email"),
         )
-    elif result["status"] == "timeout":
-        raise HTTPException(status_code=408, detail=result["message"])
+    elif result.get("status") == "timeout":
+        raise HTTPException(status_code=408, detail=result.get("message"))
     else:
         raise HTTPException(status_code=500, detail=result.get("message", "Login failed"))
 
 
-@router.get("/status", response_model=StatusResponse)
+@router.get("/status", response_model=StatusResponse, deprecated=True)
 async def get_status():
-    """Get the current OAuth session status."""
-    oauth = get_oauth_service()
-    session_status = oauth.get_session_status()
+    """DEPRECATED: Use GET /api/providers/{id}/oauth/status instead."""
+    pid = _find_chatgpt_provider_id()
+    if not pid:
+        return StatusResponse(status="not_connected")
 
-    if oauth.flow_in_progress:
-        return StatusResponse(status="connecting")
+    from mindflow.api.routes.providers import _get_registry
+
+    registry = _get_registry()
+    session_status = registry.get_oauth_status(pid)
 
     return StatusResponse(
-        status=session_status["status"],
+        status=session_status.get("status", "not_connected"),
         subscription_tier=session_status.get("subscription_tier"),
         user_email=session_status.get("user_email"),
         expires_at=session_status.get("expires_at"),
@@ -147,99 +147,70 @@ async def get_status():
     )
 
 
-@router.post("/logout", response_model=LogoutResponse)
+@router.post("/logout", response_model=LogoutResponse, deprecated=True)
 async def logout():
-    """Sign out of ChatGPT OAuth and clear stored tokens."""
-    oauth = get_oauth_service()
-    result = oauth.logout()
+    """DEPRECATED: Use POST /api/providers/{id}/oauth/logout instead."""
+    logger.warning("Deprecated endpoint /auth/openai/logout called")
+    pid = _find_chatgpt_provider_id()
+    if not pid:
+        return LogoutResponse(status="signed_out", message="No ChatGPT provider found.")
+
+    from mindflow.api.routes.providers import _get_registry
+
+    registry = _get_registry()
+    result = registry.oauth_logout(pid)
     return LogoutResponse(**result)
 
 
-@router.post("/device-code", response_model=DeviceCodeResponse)
+@router.post("/device-code", response_model=DeviceCodeResponse, deprecated=True)
 async def start_device_code():
-    """Start the device code authentication flow (for headless environments)."""
-    oauth = get_oauth_service()
+    """DEPRECATED: Use POST /api/providers/{id}/oauth/device-code instead."""
+    logger.warning("Deprecated endpoint /auth/openai/device-code called")
+    pid = _find_chatgpt_provider_id()
+    if not pid:
+        raise HTTPException(status_code=404, detail="No ChatGPT provider registered.")
 
-    if oauth.flow_in_progress:
-        raise HTTPException(status_code=409, detail="Login flow already in progress")
+    from mindflow.api.routes.providers import _get_registry
 
+    registry = _get_registry()
     try:
-        result = await oauth.start_device_code_flow()
+        result = await registry.start_device_code(pid)
         return DeviceCodeResponse(**result)
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
 
-@router.put("/method", response_model=SwitchMethodResponse)
+@router.put("/method", response_model=SwitchMethodResponse, deprecated=True)
 async def switch_auth_method(request: SwitchMethodRequest):
-    """Switch between API Key and ChatGPT OAuth authentication methods."""
-    if request.auth_method not in VALID_AUTH_METHODS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid auth_method. Must be one of: {', '.join(VALID_AUTH_METHODS)}",
-        )
-
-    oauth = get_oauth_service()
-    session_status = oauth.get_session_status()
-
-    if request.auth_method == "chatgpt_oauth":
-        status = session_status["status"]
-        if status == "not_connected":
-            message = "Switched to ChatGPT OAuth. Please sign in."
-        else:
-            message = f"Switched to ChatGPT OAuth. Status: {status}."
-    else:
-        message = "Switched to API Key authentication."
-        status = "connected"  # API key is always "connected" if set
-
+    """DEPRECATED: Auth method is now set per-provider via auth_method field."""
+    logger.warning("Deprecated endpoint /auth/openai/method called")
     return SwitchMethodResponse(
         auth_method=request.auth_method,
-        status=status,
-        message=message,
+        status="ok",
+        message="Deprecated. Use provider auth_method field instead.",
     )
 
 
-@router.get("/models", response_model=ModelsResponse)
+@router.get("/models", response_model=ModelsResponse, deprecated=True)
 async def get_models():
-    """Get available models for the current authentication method.
-
-    For ChatGPT OAuth, returns known Codex models (the OAuth token
-    doesn't have access to api.openai.com/v1/models).
-    """
-    from mindflow.providers.openai_chatgpt import CHATGPT_MODELS, DEFAULT_MODEL
-
-    oauth = get_oauth_service()
-    token = await oauth.get_valid_token()
-
-    if not token:
-        return ModelsResponse(
-            models=[],
-            selected_model=None,
-            auth_method="chatgpt_oauth",
-        )
-
-    # Return known ChatGPT/Codex models (OAuth tokens can't query /v1/models)
-    models = [
-        ModelInfo(id=m, name=m, available=True)
-        for m in CHATGPT_MODELS
-    ]
-
+    """DEPRECATED: Use GET /api/providers/{id}/models instead."""
     return ModelsResponse(
-        models=models,
-        selected_model=DEFAULT_MODEL,
+        models=[
+            ModelInfo(id="gpt-4o", name="gpt-4o"),
+            ModelInfo(id="gpt-4o-mini", name="gpt-4o-mini"),
+            ModelInfo(id="gpt-4-turbo", name="gpt-4-turbo"),
+        ],
+        selected_model="gpt-4o",
         auth_method="chatgpt_oauth",
     )
 
 
-@router.put("/model", response_model=SelectModelResponse)
+@router.put("/model", response_model=SelectModelResponse, deprecated=True)
 async def select_model(request: SelectModelRequest):
-    """Select the preferred model."""
-    if not request.model:
-        raise HTTPException(status_code=400, detail="Model ID is required")
-
+    """DEPRECATED: Use PUT /api/providers/{id} with selected_model field instead."""
     return SelectModelResponse(
         selected_model=request.model,
-        message="Model updated.",
+        message="Deprecated. Use provider update endpoint instead.",
     )
 
 

@@ -9,7 +9,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Moon, Sun, Grid3x3, Map, Brain, Eye, Save, Plug } from 'lucide-react';
 import { useCanvasStore } from '../stores/canvasStore';
-import { OAuthLoginButton } from './OAuthLoginButton';
+// OAuthLoginButton removed — OAuth is now inline per-provider in ProviderSettingsPanel
 import { ProviderSettingsPanel } from './ProviderSettingsPanel';
 import { MCPConnectionsPanel } from './MCPConnectionsPanel';
 
@@ -230,12 +230,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
           {activeTab === 'llm_providers' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {/* ChatGPT OAuth Section */}
-              <Section title="ChatGPT Subscription">
-                <OAuthLoginButton />
-              </Section>
-
-              {/* Provider Registry — full CRUD */}
+              {/* Provider Registry — unified CRUD with OAuth inline */}
               <ProviderSettingsPanel />
 
               {/* Shared LLM Defaults */}

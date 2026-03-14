@@ -1,138 +1,94 @@
-# Workbench - Temporary files and experiments
+# ============================================================================
+# Assisted MindFlow — .gitignore
+# Python (backend) + TypeScript/React (frontend)
+# ============================================================================
+
+# ── Workbench (experiments, temp scripts) ──────────────────────
 workbench/
 */workbench/
 
-# Build artifacts
-build/
-dist/
-*.exe
-*.dll
-*.so
-*.dylib
-*.a
-*.lib
-*.obj
-*.o
-
-# Logs
-*.log
-logs/
-*/logs/
-
-# IDE and Editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Python
+# ── Python ─────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
 venv/
-ENV/
 .venv/
-.venv
+env/
+ENV/
 pip-log.txt
 pip-delete-this-directory.txt
+*.egg-info/
+*.egg
+dist/
+build/
 .pytest_cache/
 .coverage
 htmlcov/
-*.egg-info/
-dist/
-build/
-*.pyc
+.mypy_cache/
+.ruff_cache/
 
-# Node.js / Frontend
+# ── Node.js / Frontend ────────────────────────────────────────
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .pnpm-store/
-
-# Frontend build artifacts
 frontend/dist/
 frontend/build/
 frontend/.vite/
 .cache/
 
-# Dependency lock files (keep for consistency)
-# Uncomment if you want to ignore lock files:
-# package-lock.json
-# yarn.lock
-# pnpm-lock.yaml
+# ── IDE / Editor ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# C/C++
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
-*.cmake
-
-# Java
-*.class
-*.jar
-*.war
-*.ear
-target/
-
-# Rust
-target/
-Cargo.lock
-**/*.rs.bk
-
-# Go
-*.test
-*.out
-vendor/
-
-# OS
+# ── OS files ──────────────────────────────────────────────────
+.DS_Store
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
-.DS_Store
+NUL
 
-# Temporary files
+# ── Temporary files ───────────────────────────────────────────
 *.tmp
 *.temp
 *.bak
-*.swp
-*.swo
+*.log
 
-# Test data
-test_data/
-*.test.db
-
-# Secrets and credentials
+# ── Secrets & Credentials (CRITICAL — never commit) ──────────
 .env
-.env.local
+.env.*
+!.env.example
 *.key
 *.pem
+*.p12
+*.pfx
+*.crt
 credentials.json
 config.local.*
 secrets.*
 
-# MindFlow-specific
-config/config.json
+# ── MindFlow data (user-specific, never commit) ──────────────
+data/oauth/
+data/secrets/
+data/operations.db
 data/graphs/*.json
 data/backups/*.json
 data/canvases/*.json
 data/versions/
-data/operations.db
-data/oauth/
-data/secrets/
 data/providers.json
 data/mcp_connections.json
-NUL
+config/config.json
+
+# ── Test artifacts ────────────────────────────────────────────
+test_data/
+*.test.db
+frontend/test_output.txt
+coverage/

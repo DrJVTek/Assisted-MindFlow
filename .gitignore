@@ -128,8 +128,10 @@ secrets.*
 config/config.json
 data/graphs/*.json
 data/backups/*.json
-data/oauth/session.enc
-data/oauth/.salt
+data/canvases/*.json
+data/versions/
+data/operations.db
+data/oauth/
 data/secrets/
 data/providers.json
 data/mcp_connections.json

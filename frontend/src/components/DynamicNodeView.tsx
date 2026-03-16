@@ -19,6 +19,8 @@ interface DynamicNodeViewProps {
   values: Record<string, unknown>;
   onChange: (name: string, value: unknown) => void;
   readOnly?: boolean;
+  /** Exclude inputs of these types (e.g., ['STRING'] to skip prompt fields handled elsewhere) */
+  excludeTypes?: string[];
 }
 
 function resolveInputSpec(raw: InputSpec | [string, ...unknown[]]): {
@@ -161,21 +163,32 @@ function InputWidget({
   }
 }
 
-export function DynamicNodeView({ nodeTypeDef, values, onChange, readOnly }: DynamicNodeViewProps) {
+export function DynamicNodeView({ nodeTypeDef, values, onChange, readOnly, excludeTypes }: DynamicNodeViewProps) {
   const { inputs } = nodeTypeDef;
+  const excludeSet = new Set(excludeTypes || []);
+
+  const filterSection = (
+    section: Record<string, InputSpec | [string, ...unknown[]]> | undefined,
+  ): [string, InputSpec | [string, ...unknown[]]][] => {
+    if (!section) return [];
+    return Object.entries(section).filter(([, rawSpec]) => {
+      const { type } = resolveInputSpec(rawSpec);
+      return !excludeSet.has(type);
+    });
+  };
 
   const renderSection = (
     title: string,
-    section: Record<string, InputSpec | [string, ...unknown[]]> | undefined,
+    entries: [string, InputSpec | [string, ...unknown[]]][],
   ) => {
-    if (!section || Object.keys(section).length === 0) return null;
+    if (entries.length === 0) return null;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary, #888)', textTransform: 'uppercase' }}>
           {title}
         </div>
-        {Object.entries(section).map(([name, rawSpec]) => {
+        {entries.map(([name, rawSpec]) => {
           const { type, spec } = resolveInputSpec(rawSpec);
           return (
             <div key={name} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -197,10 +210,15 @@ export function DynamicNodeView({ nodeTypeDef, values, onChange, readOnly }: Dyn
     );
   };
 
+  const requiredEntries = filterSection(inputs.required);
+  const optionalEntries = filterSection(inputs.optional);
+
+  if (requiredEntries.length === 0 && optionalEntries.length === 0) return null;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      {renderSection('Required', inputs.required)}
-      {renderSection('Optional', inputs.optional)}
+      {renderSection('Settings', requiredEntries)}
+      {renderSection('Optional', optionalEntries)}
     </div>
   );
 }

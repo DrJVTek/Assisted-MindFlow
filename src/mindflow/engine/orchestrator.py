@@ -170,12 +170,45 @@ class Orchestrator:
         return self._registry.node_classes.get(class_type)
 
     async def _resolve_provider(self, node_id: UUID) -> Any:
-        """Resolve the provider instance for a node, if needed."""
+        """Resolve the provider instance for a node.
+
+        Resolution order:
+        1. Explicit provider_id on the node
+        2. Auto-detect from plugin class_type category (e.g., llm/chatgpt_web → chatgpt_web)
+        """
         if self._provider_resolver is None:
             return None
         node = self._graph.nodes[node_id]
+
+        # 1. Explicit provider_id
         if node.provider_id:
             return self._provider_resolver(str(node.provider_id))
+
+        # 2. Auto-resolve from plugin category
+        class_type = node.class_type or "text_input"
+        node_cls = self._registry.node_classes.get(class_type)
+        if node_cls is None:
+            return None
+
+        category = getattr(node_cls, "CATEGORY", "")
+        if not category.startswith("llm/"):
+            return None
+
+        # Extract provider type from category: "llm/chatgpt_web" → "chatgpt_web"
+        plugin_provider_type = category.split("/")[1]
+        # Map plugin category to ProviderType (ollama → local)
+        if plugin_provider_type == "ollama":
+            plugin_provider_type = "local"
+
+        # Find matching provider in registry
+        from mindflow.api.routes.providers import _get_registry
+        provider_registry = _get_registry()
+        for p_config in provider_registry.list_providers():
+            if p_config.type.value == plugin_provider_type:
+                instance = provider_registry.get_provider_instance(str(p_config.id))
+                if instance:
+                    return instance
+
         return None
 
     async def _execute_node(self, node_id: UUID) -> dict[str, Any]:
@@ -320,11 +353,9 @@ class Orchestrator:
 
                 if is_streamable and node_cls is not None:
                     try:
-                        outputs = await self._stream_terminal_node(node_id, node_cls)
-                        yield {
-                            "event": "node_complete",
-                            "data": {"node_id": str(node_id), "outputs": outputs},
-                        }
+                        # Stream tokens via SSE events
+                        async for event in self._stream_terminal_node_events(node_id, node_cls):
+                            yield event
                     except Exception as e:
                         failed_ancestors.add(node_id)
                         yield {
@@ -351,6 +382,70 @@ class Orchestrator:
         yield {
             "event": "execution_complete" if not has_failures else "execution_error",
             "data": {"status": "failed" if has_failures else "completed"},
+        }
+
+    async def _stream_terminal_node_events(
+        self, node_id: UUID, node_cls: Any
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream the terminal node's output as SSE token events.
+
+        Yields token events during streaming, then a node_complete event
+        with the full outputs dict.
+        """
+        node = self._graph.nodes[node_id]
+        inputs = self._resolve_inputs(node_id)
+
+        provider = await self._resolve_provider(node_id)
+        if provider is not None:
+            inputs["provider"] = provider
+
+        instance = node_cls()
+        stream_func = getattr(instance, "stream", None)
+
+        if stream_func is None:
+            # Fall back to batch execute
+            outputs = await self._execute_node(node_id)
+            yield {
+                "event": "node_complete",
+                "data": {"node_id": str(node_id), "outputs": outputs},
+            }
+            return
+
+        # Stream tokens one by one
+        tokens = []
+        async for token in stream_func(**inputs):
+            tokens.append(token)
+            yield {
+                "event": "token",
+                "data": {"node_id": str(node_id), "token": token},
+            }
+
+        full_response = "".join(tokens)
+
+        # Build outputs dict
+        return_names = getattr(node_cls, "RETURN_NAMES", ("response",))
+        outputs: dict[str, Any] = {}
+        if return_names:
+            outputs[return_names[0]] = full_response
+        if len(return_names) > 1 and return_names[1] == "context":
+            context = inputs.get("context", "")
+            prompt = inputs.get("prompt", node.content or "")
+            if context:
+                context += "\n\n"
+            context += f"User: {prompt}\nAssistant: {full_response}"
+            outputs["context"] = context
+        if "prompt" in return_names:
+            outputs["prompt"] = inputs.get("prompt", node.content or "")
+
+        self._outputs[node_id] = outputs
+
+        # Also persist the response to the node model
+        node.llm_response = full_response
+        node.llm_status = "complete"
+
+        yield {
+            "event": "node_complete",
+            "data": {"node_id": str(node_id), "outputs": outputs},
         }
 
     async def _stream_terminal_node(

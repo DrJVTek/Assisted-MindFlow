@@ -109,11 +109,14 @@ async def execute_node(
             try:
                 async for event in orchestrator.stream_execute(target=nid):
                     event_type = event["event"]
-                    data = json.dumps(event["data"])
-                    yield f"event: {event_type}\ndata: {data}\n\n"
+                    event_data = event["data"]
 
-                    # For token streaming of the terminal node,
-                    # check if this is a streamable terminal and emit tokens
+                    # Inject execution_id into execution_start for frontend tracking
+                    if event_type == "execution_start":
+                        event_data["execution_id"] = execution_id
+
+                    data = json.dumps(event_data)
+                    yield f"event: {event_type}\ndata: {data}\n\n"
             finally:
                 _active_executions.pop(execution_id, None)
                 # Persist graph after execution (node outputs may update content)

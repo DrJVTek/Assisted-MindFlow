@@ -20,14 +20,12 @@ import {
   Settings2,
   Plus,
 } from 'lucide-react';
-import type { Node, NodeType, NodeStatus } from '../types/graph';
+import type { Node } from '../types/graph';
 import { useProviderStore } from '../stores/providerStore';
 import { PROVIDER_TYPE_LABELS } from '../types/provider';
-import { ProviderSelector } from './ProviderSelector';
 import { LLMNodeContent } from './LLMNodeContent';
 import { DynamicNodeView } from './DynamicNodeView';
-import { useLLMOperationsStore } from '../stores/llmOperationsStore';
-import { useStreamingContent } from '../hooks/useStreamingContent';
+import { useGraphExecution } from '../hooks/useGraphExecution';
 import { useNodeTypesStore } from '../stores/nodeTypesStore';
 import { api } from '../services/api';
 
@@ -104,9 +102,8 @@ export function DetailPanel({
     return undefined;
   });
 
-  // LLM operations
-  const { createOperation } = useLLMOperationsStore();
-  const { startStreaming } = useStreamingContent(node.id, { graphId });
+  // Graph execution engine
+  const { executeNode, isExecuting: executionRunning, nodeResults, cancelExecution } = useGraphExecution(graphId);
 
   // Parent context
   const parentContext = getParentContext(node, allNodes);
@@ -168,64 +165,10 @@ export function DetailPanel({
     // Save content first
     await handleSaveContent();
 
-    try {
-      const DEFAULT_MODELS: Record<string, string> = {
-        openai: 'gpt-4o',
-        anthropic: 'claude-sonnet-4-6',
-        gemini: 'gemini-2.0-flash',
-        local: 'llama3.2',
-        chatgpt_web: 'gpt-5.1-codex',
-      };
-
-      // Resolve provider: explicit provider > plugin auto-detect > localStorage config
-      let providerType: string | undefined;
-      let providerModel: string | undefined;
-      let resolvedProviderId: string | undefined;
-
-      if (provider) {
-        // Provider already resolved (from provider_id or plugin category auto-detect)
-        providerType = provider.type;
-        providerModel = provider.selected_model || DEFAULT_MODELS[provider.type];
-        resolvedProviderId = provider.id;
-      } else {
-        // Last resort: check localStorage
-        const storedConfig = localStorage.getItem('mindflow_llm_config');
-        if (storedConfig) {
-          const config = JSON.parse(storedConfig);
-          providerType = config.provider;
-          providerModel = config.model;
-        }
-      }
-
-      if (!providerType) {
-        alert('No provider configured for this node type. Add a provider in Settings.');
-        return;
-      }
-      if (!providerModel) {
-        providerModel = DEFAULT_MODELS[providerType];
-      }
-
-      const operationRequest: Record<string, unknown> = {
-        nodeId: node.id,
-        graphId,
-        provider: providerType,
-        model: providerModel,
-        prompt: content,
-      };
-
-      if (resolvedProviderId || providerId) operationRequest.provider_id = resolvedProviderId || providerId;
-
-      const mcpTools = (node as any).mcp_tools;
-      if (mcpTools && mcpTools.length > 0) {
-        operationRequest.mcp_tools = mcpTools;
-      }
-
-      const operationId = await createOperation(operationRequest as any);
-      if (operationId) startStreaming(operationId);
-    } catch (err) {
-      console.error('Failed to generate:', err);
-    }
-  }, [graphId, content, node.id, provider, providerId, createOperation, startStreaming, handleSaveContent]);
+    // Use the execution engine — it handles provider resolution,
+    // topological sort, context from parents, and SSE streaming
+    executeNode(node.id, true);
+  }, [graphId, content, node.id, executeNode, handleSaveContent]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Ctrl+Enter or Cmd+Enter to send
@@ -256,11 +199,18 @@ export function DetailPanel({
     }
   }, [graphId, node.id]);
 
-  // ─── Derived state ──────────────────────────────────────────────
-  const llmStatus = (node as any).llm_status || 'idle';
-  const llmResponse = node.llm_response || null;
-  const llmError = (node as any).llm_error || null;
-  const isExecuting = llmStatus === 'queued' || llmStatus === 'streaming';
+  // ─── Derived state from execution engine + persisted node ────────
+  const nodeResult = nodeResults[node.id];
+  const streamingTokens = nodeResult?.tokens || null;
+  const executionError = nodeResult?.error || null;
+
+  // Prefer live streaming tokens over persisted response
+  const llmResponse = streamingTokens || node.llm_response || null;
+  const llmError = executionError || (node as any).llm_error || null;
+  const isExecuting = executionRunning || (node as any).llm_status === 'queued' || (node as any).llm_status === 'streaming';
+  const llmStatus = executionRunning
+    ? (streamingTokens ? 'streaming' : 'queued')
+    : ((node as any).llm_status || 'idle');
 
   // ─── Render ─────────────────────────────────────────────────────
   return (
@@ -356,8 +306,8 @@ export function DetailPanel({
               Provider: {provider.name} ({PROVIDER_TYPE_LABELS[provider.type]})
             </div>
           )}
-          {/* Dynamic input widgets from plugin metadata */}
-          {nodeTypeDef && nodeTypeDef.inputs?.optional && Object.keys(nodeTypeDef.inputs.optional).length > 0 && (
+          {/* Dynamic input widgets from plugin metadata (COMBO, INT, FLOAT, BOOLEAN — not STRING which is the prompt) */}
+          {nodeTypeDef && (
             <DynamicNodeView
               nodeTypeDef={nodeTypeDef}
               values={(node as any).inputs || {}}
@@ -368,6 +318,7 @@ export function DetailPanel({
                   .then(() => onUpdate?.(node.id, { inputs: updatedInputs } as any))
                   .catch(err => console.error('Failed to save input:', err));
               }}
+              excludeTypes={['STRING']}
             />
           )}
         </div>
@@ -403,8 +354,8 @@ export function DetailPanel({
               fontSize={14}
               onContentChange={handleContentChange}
               onGenerateClick={handleGenerate}
-              onStopClick={() => { }}
-              onRefreshClick={() => { }}
+              onStopClick={cancelExecution}
+              onRefreshClick={handleGenerate}
               onHeightsChange={handleHeightsChange}
               onNoteChange={handleNoteChange}
             />

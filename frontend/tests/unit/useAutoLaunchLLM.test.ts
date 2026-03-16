@@ -31,6 +31,27 @@ vi.mock('../../src/hooks/useStreamingContent', () => ({
   }))
 }));
 
+vi.mock('../../src/stores/providerStore', () => ({
+  useProviderStore: {
+    getState: () => ({
+      providers: [
+        { id: 'test-provider-id', type: 'local', name: 'Test Ollama', selected_model: 'llama3.2' },
+      ],
+    }),
+  },
+}));
+
+vi.mock('../../src/stores/nodeTypesStore', () => ({
+  useNodeTypesStore: {
+    getState: () => ({
+      getProviderType: (classType: string) => {
+        if (classType === 'ollama_chat') return 'local';
+        return null;
+      },
+    }),
+  },
+}));
+
 // Mock functions
 const mockCreateOperation = vi.fn();
 const mockStartStreaming = vi.fn();
@@ -41,10 +62,13 @@ describe('useAutoLaunchLLM', () => {
     vi.clearAllMocks();
     mockCreateOperation.mockResolvedValue('op-123');
     mockStartStreaming.mockResolvedValue(undefined);
+    // Provide default LLM config in localStorage for tests without classType
+    localStorage.setItem('mindflow_llm_config', JSON.stringify({ provider: 'local', model: 'llama3.2' }));
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    localStorage.removeItem('mindflow_llm_config');
   });
 
   it('launches LLM on mount when isNewNode=true', async () => {

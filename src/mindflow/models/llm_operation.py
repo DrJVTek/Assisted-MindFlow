@@ -121,7 +121,7 @@ class LLMOperation(BaseModel):
     queue_position: Optional[int] = Field(default=None, ge=0)
 
     # LLM configuration
-    provider: str = Field(pattern="^(openai|anthropic|ollama)$")
+    provider: str = Field(pattern="^(openai|openai_chatgpt|chatgpt_web|anthropic|ollama|gemini|local)$")
     model: str
     prompt: str
     system_prompt: Optional[str] = None

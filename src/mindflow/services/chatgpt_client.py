@@ -25,6 +25,7 @@ from mindflow.models.conversation import (
     Conversation,
     ConversationMessage,
     ConversationSummary,
+    ProjectSummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -132,7 +133,53 @@ class ChatGPTClient:
                     f"ChatGPT API error (HTTP {resp.status_code}): "
                     f"{resp.text[:200] if resp.text else '(empty)'}"
                 )
-            return resp.json()
+            # Force UTF-8 decoding to avoid Latin-1 mojibake (Ã© instead of é)
+            return json.loads(resp.content.decode("utf-8"))
+
+    async def list_projects(self) -> list[ProjectSummary]:
+        """List user's ChatGPT projects (folders).
+
+        Projects are internally "snorlax" type gizmos in ChatGPT's backend.
+        """
+        url = f"{CHATGPT_BACKEND}/gizmos/snorlax/sidebar?owned_only=true&conversations_per_gizmo=0"
+        data = await self._request("GET", url)
+
+        projects = []
+        for item in data.get("items", []):
+            gz = item.get("gizmo", {}).get("gizmo", {})
+            display = gz.get("display", {})
+
+            created = None
+            if gz.get("created_at"):
+                try:
+                    created = datetime.fromisoformat(gz["created_at"])
+                except (TypeError, ValueError):
+                    pass
+
+            projects.append(
+                ProjectSummary(
+                    id=gz.get("id", ""),
+                    name=display.get("name", "Untitled"),
+                    created_at=created,
+                    conversation_count=gz.get("num_interactions"),
+                )
+            )
+
+        return projects
+
+    async def list_project_conversations(
+        self, project_id: str, offset: int = 0, limit: int = 28,
+    ) -> tuple[list[ConversationSummary], int]:
+        """List conversations within a specific project.
+
+        Args:
+            project_id: The gizmo ID of the project (g-p-...).
+            offset: Pagination offset.
+            limit: Max items to return.
+        """
+        url = f"{CHATGPT_BACKEND}/gizmos/{project_id}/conversations?cursor={offset}&limit={limit}"
+        data = await self._request("GET", url)
+        return self._parse_conversation_list(data)
 
     async def list_conversations(
         self, offset: int = 0, limit: int = 28,
@@ -153,16 +200,25 @@ class ChatGPTClient:
             params += f"&is_archived={'true' if is_archived else 'false'}"
         url = f"{CHATGPT_BACKEND}/conversations?{params}"
         data = await self._request("GET", url)
+        return self._parse_conversation_list(data)
 
+    def _parse_conversation_list(
+        self, data: dict,
+    ) -> tuple[list[ConversationSummary], int]:
+        """Parse a conversations list response into summaries."""
         items = data.get("items", [])
         total = data.get("total", len(items))
 
         summaries = []
         for item in items:
             created = None
-            if item.get("create_time"):
+            create_time = item.get("create_time")
+            if create_time:
                 try:
-                    created = datetime.fromtimestamp(item["create_time"], tz=UTC)
+                    if isinstance(create_time, str):
+                        created = datetime.fromisoformat(create_time)
+                    else:
+                        created = datetime.fromtimestamp(create_time, tz=UTC)
                 except (TypeError, ValueError):
                     pass
 

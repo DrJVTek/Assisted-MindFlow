@@ -142,7 +142,18 @@ export const useLLMOperationsStore = create<LLMOperationsState>((set, get) => ({
       );
 
       if (!response.ok) {
-        throw new Error(`Failed to create operation: ${response.statusText}`);
+        const errorBody = await response.text();
+        console.error('[createOperation] Request failed:', {
+          status: response.status,
+          body: errorBody,
+          request: {
+            node_id: request.nodeId,
+            provider: request.provider,
+            model: request.model,
+            provider_id: request.provider_id,
+          }
+        });
+        throw new Error(`Failed to create operation: ${response.status} - ${errorBody}`);
       }
 
       const data = await response.json();

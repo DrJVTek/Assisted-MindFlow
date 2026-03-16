@@ -132,6 +132,7 @@ export const api = {
       tags: string[];
       status: string;
       parent_ids?: string[];
+      provider_id?: string | null;
     }
   ): Promise<any> => {
     const response = await apiClient.post(`/graphs/${graphId}/nodes`, nodeData);
@@ -450,6 +451,35 @@ export const api = {
   },
 
   // ── Conversation Import ──────────────────────────────────────
+
+  /**
+   * List ChatGPT projects (folders)
+   */
+  listChatGPTProjects: async (): Promise<Array<{
+    id: string;
+    name: string;
+    created_at: string | null;
+    conversation_count: number | null;
+  }>> => {
+    const response = await apiClient.get('/import/chatgpt/projects');
+    return response.data;
+  },
+
+  /**
+   * List conversations within a specific ChatGPT project
+   */
+  listProjectConversations: async (projectId: string, offset = 0, limit = 28): Promise<{
+    conversations: Array<{
+      id: string;
+      title: string;
+      created_at: string | null;
+      source: string;
+    }>;
+    total: number;
+  }> => {
+    const response = await apiClient.get(`/import/chatgpt/projects/${projectId}/conversations?offset=${offset}&limit=${limit}`);
+    return response.data;
+  },
 
   /**
    * List ChatGPT conversations with optional archive filter

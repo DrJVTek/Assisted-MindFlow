@@ -5,6 +5,8 @@
 // Re-export UUID from dedicated file
 export type { UUID } from './uuid';
 
+// Legacy node types kept for backward compatibility.
+// New nodes use class_type (string) from the plugin system.
 export type NodeType =
   | 'question'
   | 'answer'
@@ -15,7 +17,8 @@ export type NodeType =
   | 'plan'
   | 'group_meta'
   | 'comment'
-  | 'stop';
+  | 'stop'
+  | string; // Plugin-defined types (e.g., "llm_chat", "text_input")
 
 export type NodeAuthor = 'human' | 'llm' | 'tool';
 
@@ -66,12 +69,17 @@ export interface NodeMetadata {
 export interface Node {
   id: UUID;
   type: NodeType;
+  class_type?: string; // Plugin node type (e.g., "llm_chat", "text_input")
   author: NodeAuthor;
   content: string;
   parents: UUID[];
   children: UUID[];
   groups: UUID[];
   meta: NodeMetadata;
+
+  // Plugin node inputs and connections (v2.0.0 format)
+  inputs?: Record<string, unknown>;
+  connections?: Record<string, { source_node_id: string; output_name: string }>;
 
   // Feature 009: Inline LLM Response Display
   llm_response?: string | null;
@@ -133,10 +141,12 @@ export interface GraphMetadata {
 
 export interface Graph {
   id: UUID;
+  version?: string; // Graph format version (default "2.0.0")
   meta: GraphMetadata;
   nodes: Record<UUID, Node>;
   groups: Record<UUID, Group>;
   comments: Record<UUID, Comment>;
+  composite_definitions?: Record<string, unknown>;
 }
 
 export type TriggerReason = 'manual_edit' | 'parent_cascade' | 'user_regen' | 'rollback';

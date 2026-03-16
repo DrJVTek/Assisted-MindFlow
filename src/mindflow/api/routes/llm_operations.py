@@ -1,6 +1,10 @@
-"""LLM Operations API endpoints.
+"""LLM Operations API endpoints (DEPRECATED).
 
-Provides REST API and SSE streaming for concurrent LLM operations:
+DEPRECATED: These endpoints are superseded by the graph execution engine
+at POST /api/graphs/{graph_id}/execute/{node_id}. They are kept for
+backward compatibility during migration. See execution.py for the new API.
+
+Legacy endpoints:
 - Create operations
 - Stream tokens via Server-Sent Events
 - Query operation status
@@ -8,24 +12,19 @@ Provides REST API and SSE streaming for concurrent LLM operations:
 - List operations with filters
 """
 
-import asyncio
+import json
 import logging
-import os
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from mindflow.models.llm_operation import LLMOperation
 from mindflow.models.graph import NodeState
 from mindflow.services.operation_state import OperationStateManager
-from mindflow.providers.openai import OpenAIProvider
-from mindflow.providers.anthropic import AnthropicProvider
-from mindflow.providers.ollama import OllamaProvider
-from mindflow.providers.openai_chatgpt import OpenAIChatGPTProvider
 from mindflow.api.routes.providers import _get_registry
 from mindflow.services.tool_use_service import generate_with_tools
 
@@ -45,7 +44,7 @@ state_manager = OperationStateManager()
 class CreateOperationRequest(BaseModel):
     """Request to create a new LLM operation."""
     node_id: UUID
-    provider: str = Field(pattern="^(openai|openai_chatgpt|anthropic|ollama|gemini)$")
+    provider: str = Field(pattern="^(openai|openai_chatgpt|chatgpt_web|anthropic|ollama|gemini|local)$")
     provider_id: Optional[str] = None  # Feature 011: resolve provider from registry
     model: str
     prompt: str
@@ -134,26 +133,29 @@ async def stream_operation(operation_id: UUID):
 
     async def event_generator():
         try:
-            # Get provider — try registry first (Feature 011), fallback to legacy map
+            # Resolve provider from registry — no silent fallback
             provider = None
+            registry = _get_registry()
+
+            # Try explicit provider_id first (from operation metadata)
             op_provider_id = operation.metadata.get("provider_id") if operation.metadata else None
             if op_provider_id:
-                registry = _get_registry()
                 provider = registry.get_provider_instance(op_provider_id)
 
+            # If no provider_id, find by provider type
             if provider is None:
-                provider_map = {
-                    "openai": OpenAIProvider,
-                    "openai_chatgpt": OpenAIChatGPTProvider,
-                    "anthropic": AnthropicProvider,
-                    "ollama": OllamaProvider,
-                }
-                ProviderClass = provider_map.get(operation.provider)
-                if not ProviderClass:
-                    yield f"event: error\n"
-                    yield f"data: {{\"error\": \"Provider {operation.provider} not configured\"}}\n\n"
-                    return
-                provider = ProviderClass()
+                for p_config in registry.list_providers():
+                    if p_config.type.value == operation.provider or (
+                        p_config.type.value == "local" and operation.provider == "ollama"
+                    ):
+                        provider = registry.get_provider_instance(str(p_config.id))
+                        if provider:
+                            break
+
+            if provider is None:
+                error_data = json.dumps({"error": f"Provider '{operation.provider}' not configured. Add it in Provider Settings."})
+                yield f"event: error\ndata: {error_data}\n\n"
+                return
 
             # Check for MCP tool-use
             mcp_tool_names = operation.metadata.get("mcp_tools") if operation.metadata else None
@@ -182,13 +184,13 @@ async def stream_operation(operation_id: UUID):
                     )
 
                     await state_manager.append_content(operation_id, result)
-                    token_escaped = result.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-                    yield f"event: token\n"
-                    yield f"data: {{\"content\": \"{token_escaped}\"}}\n\n"
+                    token_data = json.dumps({"content": result})
+                    yield f"event: token\ndata: {token_data}\n\n"
 
-                    await state_manager.complete_operation(operation_id, tokens_used=len(result.split()))
-                    yield f"event: complete\n"
-                    yield f"data: {{\"tokens_used\": {len(result.split())}}}\n\n"
+                    tokens_used = len(result.split())
+                    await state_manager.complete_operation(operation_id, tokens_used=tokens_used)
+                    complete_data = json.dumps({"tokens_used": tokens_used})
+                    yield f"event: complete\ndata: {complete_data}\n\n"
                     return
 
             # Standard streaming (no tools)
@@ -199,11 +201,12 @@ async def stream_operation(operation_id: UUID):
             token_count = 0
             first_token = True
 
+            stream_kwargs = dict(operation.metadata) if operation.metadata else {}
             async for token in provider.stream(
                 prompt=operation.prompt,
                 model=operation.model,
                 system_prompt=operation.system_prompt,
-                metadata=operation.metadata
+                **stream_kwargs,
             ):
                 if first_token:
                     await state_manager.update_status(operation_id, NodeState.STREAMING)
@@ -214,9 +217,8 @@ async def stream_operation(operation_id: UUID):
                 await state_manager.append_content(operation_id, token)
                 token_count += 1
 
-                token_escaped = token.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
-                yield f"event: token\n"
-                yield f"data: {{\"content\": \"{token_escaped}\"}}\n\n"
+                token_data = json.dumps({"content": token})
+                yield f"event: token\ndata: {token_data}\n\n"
 
                 if token_count % 10 == 0:
                     progress = min(90, token_count // 2)
@@ -231,9 +233,8 @@ async def stream_operation(operation_id: UUID):
         except Exception as e:
             logger.exception(f"Error streaming operation {operation_id}")
             await state_manager.fail_operation(operation_id, str(e))
-            error_escaped = str(e).replace('\\', '\\\\').replace('"', '\\"')
-            yield f"event: error\n"
-            yield f"data: {{\"error\": \"{error_escaped}\"}}\n\n"
+            error_data = json.dumps({"error": str(e)})
+            yield f"event: error\ndata: {error_data}\n\n"
 
     return StreamingResponse(
         event_generator(),

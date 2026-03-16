@@ -12,18 +12,10 @@ from pydantic import BaseModel, Field
 
 
 # Type definitions
-NodeType = Literal[
-    "question",
-    "answer",
-    "note",
-    "hypothesis",
-    "evaluation",
-    "summary",
-    "plan",
-    "group_meta",
-    "comment",
-    "stop",
-]
+# Node type — accepts any string to support dynamic plugin class_types
+# (e.g., "openai_chat", "text_input", "anthropic_chat", ...)
+# Legacy types preserved for backward compatibility: question, answer, note, etc.
+NodeType = str
 
 NodeAuthor = Literal["human", "llm", "tool"]
 
@@ -97,12 +89,17 @@ class Node(BaseModel):
 
     id: UUID = Field(default_factory=uuid4)
     type: NodeType
+    class_type: Optional[str] = None  # Plugin node type ID (e.g., "llm_chat", "text_input")
     author: NodeAuthor
-    content: str = Field(default="", min_length=1, max_length=10000)
+    content: str = Field(default="", min_length=0, max_length=10000)
     parents: list[UUID] = Field(default_factory=list)
     children: list[UUID] = Field(default_factory=list)
     groups: list[UUID] = Field(default_factory=list)
     meta: NodeMetadata = Field(default_factory=NodeMetadata)
+
+    # Plugin node inputs and connections (v2.0.0 format)
+    inputs: dict = Field(default_factory=dict)  # Input values: {name: value}
+    connections: dict = Field(default_factory=dict)  # Input connections: {name: {source_node_id, output_name}}
 
     # Feature 011: Multi-provider LLM support
     provider_id: Optional[UUID] = None  # Reference to ProviderConfig; null = default provider

@@ -45,6 +45,30 @@ class NodeState(str, Enum):
     CANCELLED = "cancelled"
 
 
+class NodeExecutionState(str, Enum):
+    """Execution caching state for dirty/clean tracking.
+
+    Orthogonal to NodeState (which tracks LLM streaming lifecycle).
+    This enum tracks whether a node's cached output is still valid.
+
+    State Transitions:
+        DIRTY → EXECUTING → CLEAN
+                    ↓
+                 FAILED → DIRTY (retry via mark_dirty)
+
+    Dirty Propagation:
+        - User edits node content/inputs → mark DIRTY
+        - Node marked DIRTY → all descendants become DIRTY
+        - Node execution completes → mark CLEAN, store output in cache
+        - Node execution fails → mark FAILED, skip downstream
+    """
+
+    DIRTY = "dirty"
+    CLEAN = "clean"
+    EXECUTING = "executing"
+    FAILED = "failed"
+
+
 class GraphMetadata(BaseModel):
     """Metadata for a Graph.
 
@@ -108,6 +132,7 @@ class Graph(BaseModel):
     """
 
     id: UUID = Field(default_factory=uuid4)
+    version: str = Field(default="2.0.0")  # Graph format version
     meta: GraphMetadata
     nodes: Dict[UUID, Node] = Field(default_factory=dict)
     groups: Dict[UUID, Group] = Field(default_factory=dict)
@@ -115,6 +140,7 @@ class Graph(BaseModel):
 
     # Multi-canvas feature additions
     subgraph_instances: Dict[UUID, dict] = Field(default_factory=dict)  # UUID -> SubGraphInstance
+    composite_definitions: Dict[str, dict] = Field(default_factory=dict)  # Composite node defs
     complexity_score: int = Field(default=0, ge=0)
 
     def to_json(self) -> str:

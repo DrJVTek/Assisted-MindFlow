@@ -325,52 +325,11 @@ async def oauth_device_code(provider_id: str):
 
 
 async def _discover_models(config: ProviderConfig, provider: object) -> list[str]:
-    """Discover available models from a provider."""
-    try:
-        if config.type == ProviderType.OPENAI:
-            from openai import AsyncOpenAI
+    """Discover available models using provider.list_models()."""
+    from mindflow.providers.base import LLMProvider as BaseLLMProvider
 
-            creds = _get_registry().get_credentials(str(config.id))
-            client = AsyncOpenAI(
-                api_key=creds.api_key if creds else None,
-                base_url=config.endpoint_url,
-            )
-            models = await client.models.list()
-            return sorted([m.id for m in models.data if "gpt" in m.id.lower()])
+    if not isinstance(provider, BaseLLMProvider):
+        raise TypeError(f"Expected LLMProvider, got {type(provider).__name__}")
 
-        if config.type == ProviderType.ANTHROPIC:
-            return [
-                "claude-opus-4-20250514",
-                "claude-sonnet-4-20250514",
-                "claude-haiku-4-5-20251001",
-            ]
-
-        if config.type == ProviderType.GEMINI:
-            return ["gemini-2.0-flash", "gemini-2.5-pro", "gemini-2.5-flash"]
-
-        if config.type == ProviderType.LOCAL:
-            import httpx
-
-            # Try Ollama API first, then OpenAI-compatible /v1/models
-            endpoint = config.endpoint_url or "http://localhost:11434"
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                try:
-                    resp = await client.get(f"{endpoint}/api/tags")
-                    resp.raise_for_status()
-                    data = resp.json()
-                    return [m["name"] for m in data.get("models", [])]
-                except Exception:
-                    # Fallback: OpenAI-compatible endpoint (LM Studio, vLLM, etc.)
-                    resp = await client.get(f"{endpoint}/v1/models")
-                    resp.raise_for_status()
-                    data = resp.json()
-                    return [m["id"] for m in data.get("data", [])]
-
-        if config.type == ProviderType.CHATGPT_WEB:
-            return ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
-
-    except Exception as exc:
-        logger.warning("Model discovery failed for %s (%s): %s", config.name, config.type, exc)
-        raise
-
-    return []
+    models = await provider.list_models()
+    return [m.id for m in models]

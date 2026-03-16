@@ -1,4 +1,7 @@
-"""LLM Provider abstraction for streaming completions.
+"""LLM Provider abstraction for streaming completions (DEPRECATED).
+
+DEPRECATED: Use src/mindflow/providers/ instead. This module is kept only
+for backward compatibility with llm_concurrency.py during migration.
 
 This module defines the abstract base class for all LLM providers (OpenAI, Anthropic, Ollama).
 Providers implement a unified streaming interface for token-by-token content generation.

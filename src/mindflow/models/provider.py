@@ -14,6 +14,7 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
+from pydantic import FieldValidationInfo
 
 
 class ProviderType(str, Enum):

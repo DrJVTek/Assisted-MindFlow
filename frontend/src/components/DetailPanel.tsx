@@ -1,21 +1,37 @@
 /**
- * DetailPanel Component - Displays and edits node details
+ * DetailPanel — ChatGPT-like workspace for the selected node.
  *
- * Features:
- * - Shows complete node content
- * - Editable metadata (Type, Status, Importance, Tags)
- * - Shows creation and update timestamps
- * - Lists parent and child connections
+ * When a node is selected on the canvas, this panel shows:
+ * 1. Parent context (previous response, read-only) at top
+ * 2. Prompt editor (the node's content)
+ * 3. LLM response zone (streamed markdown)
+ * 4. Auto-creates a new empty child node after response completes
+ *
+ * The canvas shows collapsed compact nodes; this panel is where
+ * the actual conversation/editing happens.
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { X, Save, Edit2, Wrench } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  X,
+  Send,
+  ChevronDown,
+  ChevronUp,
+  Settings2,
+  Plus,
+} from 'lucide-react';
 import type { Node, NodeType, NodeStatus } from '../types/graph';
 import { useProviderStore } from '../stores/providerStore';
 import { PROVIDER_TYPE_LABELS } from '../types/provider';
 import { ProviderSelector } from './ProviderSelector';
-import { MCPToolBrowser } from './MCPToolBrowser';
-import { useMCPStore } from '../stores/mcpStore';
+import { LLMNodeContent } from './LLMNodeContent';
+import { DynamicNodeView } from './DynamicNodeView';
+import { useLLMOperationsStore } from '../stores/llmOperationsStore';
+import { useStreamingContent } from '../hooks/useStreamingContent';
+import { useNodeTypesStore } from '../stores/nodeTypesStore';
+import { api } from '../services/api';
+
+// ─── Types ───────────────────────────────────────────────────────────
 
 export interface NodeUpdateData {
   type: string;
@@ -27,480 +43,526 @@ export interface NodeUpdateData {
 
 interface DetailPanelProps {
   node: Node;
+  graphId: string;
+  /** All nodes in the graph — used to find parent content */
+  allNodes: Record<string, Node>;
   onClose: () => void;
-  onUpdate?: (nodeId: string, updates: NodeUpdateData) => void;
+  onUpdate?: (nodeId: string, updates: Partial<NodeUpdateData>) => void;
+  /** Called when a new child node should be created */
+  onCreateChild?: (parentId: string) => void;
+  /** Called to select a different node */
+  onSelectNode?: (nodeId: string) => void;
 }
 
-const NODE_TYPES: NodeType[] = [
-  'question',
-  'answer',
-  'note',
-  'hypothesis',
-  'evaluation',
-  'summary',
-  'plan',
-  'comment',
-  'stop',
-];
+// ─── Helpers ─────────────────────────────────────────────────────────
 
-const NODE_STATUSES: NodeStatus[] = [
-  'draft',
-  'valid',
-  'invalid',
-  'final',
-  'experimental',
-];
+function getParentContext(node: Node, allNodes: Record<string, Node>): { prompt: string; response: string } | null {
+  if (!node.parents || node.parents.length === 0) return null;
 
-export function DetailPanel({ node, onClose, onUpdate }: DetailPanelProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editState, setEditState] = useState({
-    type: node.type,
-    status: node.meta.status,
-    importance: node.meta.importance,
-    tags: node.meta.tags.join(', '),
-    content: node.content,
+  // Get the first parent (primary conversation chain)
+  const parentId = node.parents[0];
+  const parent = allNodes[parentId];
+  if (!parent) return null;
+
+  return {
+    prompt: parent.content || '',
+    response: parent.llm_response || '',
+  };
+}
+
+// ─── Main Component ─────────────────────────────────────────────────
+
+export function DetailPanel({
+  node,
+  graphId,
+  allNodes,
+  onClose,
+  onUpdate,
+  onCreateChild,
+  onSelectNode,
+}: DetailPanelProps) {
+  const [content, setContent] = useState(node.content);
+  const [showSettings, setShowSettings] = useState(false);
+  const [autoCreatedChildId, setAutoCreatedChildId] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prevLlmStatusRef = useRef<string | null>(null);
+
+  // Node type info (must come before provider resolution)
+  const classType = (node as any).class_type || node.type;
+  const nodeTypeDef = useNodeTypesStore((s) => s.nodeTypes[classType]);
+  const pluginProviderType = useNodeTypesStore((s) => s.getProviderType(classType));
+  const headerColor = nodeTypeDef?.ui?.color || '#546E7A';
+  const displayName = nodeTypeDef?.display_name || (node.type || 'node').replace(/_/g, ' ');
+
+  // Provider info — resolve from explicit provider_id, or auto-detect from plugin category
+  const providerId = (node as any).provider_id || null;
+  const provider = useProviderStore((s) => {
+    // Explicit provider_id takes priority
+    if (providerId) return s.providers.find((p) => p.id === providerId);
+    // Auto-resolve from plugin category (e.g., class_type "chatgpt_web_chat" → provider type "chatgpt_web")
+    if (pluginProviderType) return s.providers.find((p) => p.type === pluginProviderType);
+    return undefined;
   });
 
-  // Reset state when node changes
+  // LLM operations
+  const { createOperation } = useLLMOperationsStore();
+  const { startStreaming } = useStreamingContent(node.id, { graphId });
+
+  // Parent context
+  const parentContext = getParentContext(node, allNodes);
+
+  // Reset when node changes
   useEffect(() => {
-    setEditState({
-      type: node.type,
-      status: node.meta.status,
-      importance: node.meta.importance,
-      tags: node.meta.tags.join(', '),
-      content: node.content,
-    });
-    setIsEditing(false);
-  }, [node]);
-
-  const handleSave = useCallback(() => {
-    if (!onUpdate) return;
-
-    const updates = {
-      type: editState.type,
-      status: editState.status,
-      importance: Number(editState.importance),
-      tags: editState.tags.split(',').map(t => t.trim()).filter(Boolean),
-      content: editState.content,
-    };
-
-    onUpdate(node.id, updates);
-    setIsEditing(false);
-  }, [node.id, editState, onUpdate]);
-
-  // Format timestamp for display
-  const formatTimestamp = (timestamp: string) => {
-    try {
-      const date = new Date(timestamp);
-      return date.toLocaleString();
-    } catch {
-      return timestamp;
+    setContent(node.content);
+    setAutoCreatedChildId(null);
+    prevLlmStatusRef.current = null;
+    // Focus textarea when opening a new empty node
+    if (!node.content && textareaRef.current) {
+      setTimeout(() => textareaRef.current?.focus(), 100);
     }
-  };
+  }, [node.id, node.content]);
 
+  // Auto-create child node when LLM response completes
+  useEffect(() => {
+    const currentStatus = (node as any).llm_status;
+    const prevStatus = prevLlmStatusRef.current;
+    prevLlmStatusRef.current = currentStatus;
+
+    if (
+      prevStatus &&
+      prevStatus !== 'complete' &&
+      currentStatus === 'complete' &&
+      !autoCreatedChildId &&
+      onCreateChild
+    ) {
+      onCreateChild(node.id);
+      // We'll get the child ID from the callback
+    }
+  }, [(node as any).llm_status, node.id, autoCreatedChildId, onCreateChild]);
+
+  // ─── Handlers ───────────────────────────────────────────────────
+
+  const handleContentChange = useCallback((newContent: string) => {
+    setContent(newContent);
+  }, []);
+
+  const handleSaveContent = useCallback(async () => {
+    if (!graphId) return;
+    try {
+      await api.updateNode(graphId, node.id, { content });
+      onUpdate?.(node.id, { content } as any);
+      // Mark node and descendants dirty for re-execution
+      fetch(`/api/graphs/${graphId}/nodes/${node.id}/mark-dirty`, {
+        method: 'POST',
+      }).catch(() => {
+        // Non-critical — dirty state will be resolved on next execution
+      });
+    } catch (err) {
+      console.error('Failed to save content:', err);
+    }
+  }, [graphId, node.id, content, onUpdate]);
+
+  const handleGenerate = useCallback(async () => {
+    if (!graphId || !content.trim()) return;
+
+    // Save content first
+    await handleSaveContent();
+
+    try {
+      const DEFAULT_MODELS: Record<string, string> = {
+        openai: 'gpt-4o',
+        anthropic: 'claude-sonnet-4-6',
+        gemini: 'gemini-2.0-flash',
+        local: 'llama3.2',
+        chatgpt_web: 'gpt-5.1-codex',
+      };
+
+      // Resolve provider: explicit provider > plugin auto-detect > localStorage config
+      let providerType: string | undefined;
+      let providerModel: string | undefined;
+      let resolvedProviderId: string | undefined;
+
+      if (provider) {
+        // Provider already resolved (from provider_id or plugin category auto-detect)
+        providerType = provider.type;
+        providerModel = provider.selected_model || DEFAULT_MODELS[provider.type];
+        resolvedProviderId = provider.id;
+      } else {
+        // Last resort: check localStorage
+        const storedConfig = localStorage.getItem('mindflow_llm_config');
+        if (storedConfig) {
+          const config = JSON.parse(storedConfig);
+          providerType = config.provider;
+          providerModel = config.model;
+        }
+      }
+
+      if (!providerType) {
+        alert('No provider configured for this node type. Add a provider in Settings.');
+        return;
+      }
+      if (!providerModel) {
+        providerModel = DEFAULT_MODELS[providerType];
+      }
+
+      const operationRequest: Record<string, unknown> = {
+        nodeId: node.id,
+        graphId,
+        provider: providerType,
+        model: providerModel,
+        prompt: content,
+      };
+
+      if (resolvedProviderId || providerId) operationRequest.provider_id = resolvedProviderId || providerId;
+
+      const mcpTools = (node as any).mcp_tools;
+      if (mcpTools && mcpTools.length > 0) {
+        operationRequest.mcp_tools = mcpTools;
+      }
+
+      const operationId = await createOperation(operationRequest as any);
+      if (operationId) startStreaming(operationId);
+    } catch (err) {
+      console.error('Failed to generate:', err);
+    }
+  }, [graphId, content, node.id, provider, providerId, createOperation, startStreaming, handleSaveContent]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Ctrl+Enter or Cmd+Enter to send
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      handleGenerate();
+    }
+  }, [handleGenerate]);
+
+  const handleHeightsChange = useCallback(async (pHeight: number, rHeight: number) => {
+    if (!graphId) return;
+    try {
+      await api.updateNode(graphId, node.id, {
+        prompt_height: Math.round(Math.max(100, pHeight)),
+        response_height: Math.round(Math.max(100, rHeight))
+      });
+    } catch (err) {
+      console.error('Failed to update heights:', err);
+    }
+  }, [graphId, node.id]);
+
+  const handleNoteChange = useCallback(async (noteTop: string | null, noteBottom: string | null) => {
+    if (!graphId) return;
+    try {
+      await api.updateNode(graphId, node.id, { note_top: noteTop, note_bottom: noteBottom });
+    } catch (err) {
+      console.error('Failed to update note:', err);
+    }
+  }, [graphId, node.id]);
+
+  // ─── Derived state ──────────────────────────────────────────────
+  const llmStatus = (node as any).llm_status || 'idle';
+  const llmResponse = node.llm_response || null;
+  const llmError = (node as any).llm_error || null;
+  const isExecuting = llmStatus === 'queued' || llmStatus === 'streaming';
+
+  // ─── Render ─────────────────────────────────────────────────────
   return (
     <div
       style={{
         position: 'fixed',
         top: 0,
         right: 0,
-        width: '400px',
+        width: '480px',
         height: '100vh',
-        backgroundColor: 'var(--panel-bg, white)',
-        boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.1)',
+        backgroundColor: '#16161E',
+        boxShadow: '-2px 0 16px rgba(0, 0, 0, 0.3)',
         zIndex: 1000,
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        borderLeft: '1px solid var(--panel-border, #e0e0e0)',
+        borderLeft: '1px solid #2A2A40',
+        color: '#E0E0E0',
       }}
     >
-      {/* Header */}
+      {/* ── Header ─────────────────────────────────────────────── */}
       <div
         style={{
-          padding: '16px',
-          borderBottom: '1px solid var(--panel-border, #e0e0e0)',
+          background: headerColor,
+          padding: '10px 16px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          backgroundColor: 'var(--panel-header-bg, #f8f9fa)',
+          flexShrink: 0,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: '18px',
-              fontWeight: 600,
-              color: 'var(--text-primary, #37474F)',
-            }}
-          >
-            Node Properties
-          </h2>
-          {!isEditing && onUpdate && (
-            <button
-              onClick={() => setIsEditing(true)}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--primary-color, #1976D2)',
-                padding: '4px',
-              }}
-              title="Edit Properties"
-            >
-              <Edit2 size={16} />
-            </button>
+          <span style={{
+            fontSize: '14px', fontWeight: 600, color: 'white',
+            textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+          }}>
+            {displayName}
+          </span>
+          {provider && (
+            <span style={{
+              fontSize: '10px', color: 'rgba(255,255,255,0.7)',
+              backgroundColor: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: '3px',
+            }}>
+              {provider.name}
+            </span>
           )}
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {isEditing && (
-            <button
-              onClick={handleSave}
-              style={{
-                background: 'var(--primary-color, #1976D2)',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                color: 'white',
-                padding: '4px 12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                fontSize: '13px',
-                fontWeight: 500,
-              }}
-            >
-              <Save size={14} /> Save
-            </button>
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'rgba(255,255,255,0.7)', padding: '4px', display: 'flex',
+            }}
+            title="Node settings"
+          >
+            <Settings2 size={16} />
+          </button>
           <button
             onClick={onClose}
             style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              color: 'var(--text-secondary, #78909C)',
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'rgba(255,255,255,0.7)', padding: '4px', display: 'flex',
             }}
-            aria-label="Close detail panel"
+            aria-label="Close panel"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div
-        style={{
-          flex: 1,
-          overflow: 'auto',
-          padding: '16px',
-        }}
-      >
-        {/* Properties Form */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-
-          {/* Type & Status */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #546E7A)' }}>Type</label>
-              {isEditing ? (
-                <select
-                  value={editState.type}
-                  onChange={(e) => setEditState({ ...editState, type: e.target.value as NodeType })}
-                  style={{
-                    padding: '6px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--input-border, #ccc)',
-                    fontSize: '14px',
-                  }}
-                >
-                  {NODE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              ) : (
-                <div style={{
-                  padding: '6px 8px',
-                  backgroundColor: 'var(--bg-secondary, #f5f5f5)',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  textTransform: 'capitalize'
-                }}>
-                  {node.type}
-                </div>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #546E7A)' }}>Status</label>
-              {isEditing ? (
-                <select
-                  value={editState.status}
-                  onChange={(e) => setEditState({ ...editState, status: e.target.value as NodeStatus })}
-                  style={{
-                    padding: '6px',
-                    borderRadius: '4px',
-                    border: '1px solid var(--input-border, #ccc)',
-                    fontSize: '14px',
-                  }}
-                >
-                  {NODE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              ) : (
-                <div style={{
-                  padding: '6px 8px',
-                  backgroundColor: 'var(--bg-secondary, #f5f5f5)',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  textTransform: 'capitalize'
-                }}>
-                  {node.meta.status}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Importance & Tags */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #546E7A)' }}>Importance ({Math.round(isEditing ? editState.importance * 100 : node.meta.importance * 100)}%)</label>
-            {isEditing ? (
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={editState.importance}
-                onChange={(e) => setEditState({ ...editState, importance: parseFloat(e.target.value) })}
-                style={{ width: '100%' }}
-              />
-            ) : (
-              <div style={{
-                height: '6px',
-                width: '100%',
-                backgroundColor: '#e0e0e0',
-                borderRadius: '3px',
-                overflow: 'hidden'
-              }}>
-                <div style={{
-                  height: '100%',
-                  width: `${node.meta.importance * 100}%`,
-                  backgroundColor: 'var(--primary-color, #1976D2)'
-                }} />
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #546E7A)' }}>Tags (comma separated)</label>
-            {isEditing ? (
-              <input
-                type="text"
-                value={editState.tags}
-                onChange={(e) => setEditState({ ...editState, tags: e.target.value })}
-                placeholder="tag1, tag2, tag3"
-                style={{
-                  padding: '6px',
-                  borderRadius: '4px',
-                  border: '1px solid var(--input-border, #ccc)',
-                  fontSize: '14px',
-                }}
-              />
-            ) : (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                {node.meta.tags.length > 0 ? (
-                  node.meta.tags.map(tag => (
-                    <span key={tag} style={{
-                      fontSize: '12px',
-                      padding: '2px 8px',
-                      backgroundColor: 'var(--tag-bg, #E3F2FD)',
-                      color: 'var(--tag-text, #1565C0)',
-                      borderRadius: '12px',
-                    }}>
-                      {tag}
-                    </span>
-                  ))
-                ) : (
-                  <span style={{ fontSize: '13px', color: 'var(--text-muted, #90A4AE)', fontStyle: 'italic' }}>No tags</span>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Content */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #546E7A)' }}>Content</label>
-            {isEditing ? (
-              <textarea
-                value={editState.content}
-                onChange={(e) => setEditState({ ...editState, content: e.target.value })}
-                style={{
-                  padding: '8px',
-                  borderRadius: '4px',
-                  border: '1px solid var(--input-border, #ccc)',
-                  fontSize: '14px',
-                  fontFamily: 'inherit',
-                  minHeight: '200px',
-                  resize: 'vertical',
-                }}
-              />
-            ) : (
-              <div style={{
-                padding: '12px',
-                backgroundColor: 'var(--bg-secondary, #f5f5f5)',
-                borderRadius: '4px',
-                fontSize: '14px',
-                lineHeight: '1.6',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                minHeight: '100px',
-              }}>
-                {node.content}
-              </div>
-            )}
-          </div>
-
-          {/* Metadata Read-only */}
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--panel-border, #e0e0e0)' }}>
-            <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary, #546E7A)', marginBottom: '12px' }}>System Info</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <MetadataRow label="ID" value={node.id} monospace />
-              <MetadataRow label="Created" value={formatTimestamp(node.meta.created_at)} />
-              <MetadataRow label="Updated" value={formatTimestamp(node.meta.updated_at)} />
-              <MetadataRow label="Author" value={node.author} />
-              <ProviderInfoRow providerId={(node as any).provider_id || null} />
-              <MetadataRow label="Parents" value={`${node.parents.length}`} />
-              <MetadataRow label="Children" value={`${node.children.length}`} />
-            </div>
-          </div>
-
-          {/* MCP Tools Section */}
-          <MCPToolsSection
-            nodeId={node.id}
-            graphId={(node as any).graph_id}
-            mcpTools={(node as any).mcp_tools || []}
-            onUpdate={onUpdate ? (tools) => {
-              // Pass mcp_tools as part of update - extending the update interface
-              (onUpdate as any)(node.id, { mcp_tools: tools });
-            } : undefined}
-          />
-
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MetadataRow({ label, value, monospace }: { label: string; value: string; monospace?: boolean }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <span style={{ fontSize: '12px', color: 'var(--text-muted, #78909C)' }}>{label}:</span>
-      <span style={{
-        fontSize: '12px',
-        color: 'var(--text-primary, #37474F)',
-        fontFamily: monospace ? 'monospace' : 'inherit',
-        backgroundColor: monospace ? 'var(--bg-secondary, #f5f5f5)' : 'transparent',
-        padding: monospace ? '2px 4px' : '0',
-        borderRadius: monospace ? '2px' : '0',
-      }}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-/** Feature 011: Display provider info in metadata section */
-function ProviderInfoRow({ providerId }: { providerId: string | null }) {
-  const provider = useProviderStore((s) =>
-    providerId ? s.providers.find((p) => p.id === providerId) : undefined
-  );
-
-  if (!provider) {
-    return <MetadataRow label="Provider" value="None (default)" />;
-  }
-
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <span style={{ fontSize: '12px', color: 'var(--text-muted, #78909C)' }}>Provider:</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-        <div
-          style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            backgroundColor: provider.color,
-          }}
-        />
-        <span style={{ fontSize: '12px', color: 'var(--text-primary, #37474F)' }}>
-          {provider.name}
-        </span>
-        <span style={{ fontSize: '10px', color: 'var(--text-muted, #78909C)' }}>
-          ({PROVIDER_TYPE_LABELS[provider.type]})
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/** Feature 011: MCP Tools section for attaching tools to nodes */
-function MCPToolsSection({
-  nodeId,
-  graphId,
-  mcpTools,
-  onUpdate,
-}: {
-  nodeId: string;
-  graphId?: string;
-  mcpTools: string[];
-  onUpdate?: (tools: string[]) => void;
-}) {
-  const { allTools, fetchAllTools } = useMCPStore();
-  const [isExpanded, setIsExpanded] = useState(false);
-
-  // Only show if there are MCP connections with tools
-  useEffect(() => {
-    fetchAllTools();
-  }, [fetchAllTools]);
-
-  if (allTools.length === 0 && mcpTools.length === 0) {
-    return null;
-  }
-
-  return (
-    <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--panel-border, #e0e0e0)' }}>
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        style={{
+      {/* ── Settings drawer ────────────────────────────────────── */}
+      {showSettings && (
+        <div style={{
+          padding: '12px 16px',
+          borderBottom: '1px solid #2A2A40',
+          backgroundColor: '#1A1A28',
           display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: 0,
-          width: '100%',
-        }}
-      >
-        <Wrench size={14} style={{ color: 'var(--text-secondary, #546E7A)' }} />
-        <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary, #546E7A)', margin: 0, flex: 1, textAlign: 'left' }}>
-          MCP Tools
-        </h3>
-        {mcpTools.length > 0 && (
-          <span style={{ fontSize: '11px', color: 'var(--primary-color)', fontWeight: 500 }}>
-            {mcpTools.length} attached
-          </span>
-        )}
-      </button>
-
-      {isExpanded && (
-        <div style={{ marginTop: '8px' }}>
-          <MCPToolBrowser
-            selectedTools={mcpTools}
-            onSelectionChange={(tools) => onUpdate?.(tools)}
-            compact
-          />
+          flexDirection: 'column',
+          gap: '8px',
+          flexShrink: 0,
+        }}>
+          <div style={{ fontSize: '11px', color: '#6B7280', fontWeight: 600, textTransform: 'uppercase' }}>
+            Node Settings
+          </div>
+          <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#9CA3AF' }}>
+            <span>ID: <code style={{ fontSize: '10px', color: '#6B7280' }}>{node.id.substring(0, 8)}...</code></span>
+            <span>Status: {(node.meta?.status || 'draft')}</span>
+            <span>Author: {node.author}</span>
+          </div>
+          {provider && (
+            <div style={{ fontSize: '12px', color: '#9CA3AF' }}>
+              Provider: {provider.name} ({PROVIDER_TYPE_LABELS[provider.type]})
+            </div>
+          )}
+          {/* Dynamic input widgets from plugin metadata */}
+          {nodeTypeDef && nodeTypeDef.inputs?.optional && Object.keys(nodeTypeDef.inputs.optional).length > 0 && (
+            <DynamicNodeView
+              nodeTypeDef={nodeTypeDef}
+              values={(node as any).inputs || {}}
+              onChange={(name, value) => {
+                if (!graphId) return;
+                const updatedInputs = { ...((node as any).inputs || {}), [name]: value };
+                api.updateNode(graphId, node.id, { inputs: updatedInputs } as any)
+                  .then(() => onUpdate?.(node.id, { inputs: updatedInputs } as any))
+                  .catch(err => console.error('Failed to save input:', err));
+              }}
+            />
+          )}
         </div>
+      )}
+
+      {/* ── Scrollable content area ────────────────────────────── */}
+      <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+
+        {/* ── Parent context (previous turn) ─────────────────── */}
+        {parentContext && parentContext.response && (
+          <ParentContextBlock
+            prompt={parentContext.prompt}
+            response={parentContext.response}
+          />
+        )}
+
+        {/* ── LLM Response zone ──────────────────────────────── */}
+        {(llmResponse || isExecuting || llmError) && (
+          <div style={{ padding: '0 16px 12px' }}>
+            <LLMNodeContent
+              nodeId={node.id}
+              graphId={graphId}
+              content={content}
+              llmResponse={llmResponse}
+              llmOperationId={(node as any).llm_operation_id || null}
+              isNewNode={false}
+              llmStatus={llmStatus}
+              llmError={llmError}
+              promptHeight={(node as any).prompt_height || 300}
+              responseHeight={(node as any).response_height || 300}
+              noteTop={(node as any).note_top || null}
+              noteBottom={(node as any).note_bottom || null}
+              fontSize={14}
+              onContentChange={handleContentChange}
+              onGenerateClick={handleGenerate}
+              onStopClick={() => { }}
+              onRefreshClick={() => { }}
+              onHeightsChange={handleHeightsChange}
+              onNoteChange={handleNoteChange}
+            />
+          </div>
+        )}
+
+        {/* Spacer to push prompt to bottom */}
+        <div style={{ flex: 1 }} />
+      </div>
+
+      {/* ── Prompt input (fixed at bottom) ─────────────────────── */}
+      <div style={{
+        borderTop: '1px solid #2A2A40',
+        padding: '12px 16px',
+        backgroundColor: '#1A1A28',
+        flexShrink: 0,
+      }}>
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          alignItems: 'flex-end',
+        }}>
+          <textarea
+            ref={textareaRef}
+            value={content}
+            onChange={(e) => handleContentChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={handleSaveContent}
+            placeholder="Type your prompt here... (Ctrl+Enter to send)"
+            style={{
+              flex: 1,
+              padding: '10px 12px',
+              borderRadius: '8px',
+              border: '1px solid #2A2A40',
+              backgroundColor: '#1E1E2E',
+              color: '#E0E0E0',
+              fontSize: '14px',
+              fontFamily: 'inherit',
+              lineHeight: '1.5',
+              minHeight: '44px',
+              maxHeight: '200px',
+              resize: 'vertical',
+              outline: 'none',
+            }}
+            rows={2}
+          />
+          <button
+            onClick={handleGenerate}
+            disabled={isExecuting || !content.trim()}
+            style={{
+              background: isExecuting ? '#374151' : headerColor,
+              border: 'none',
+              borderRadius: '8px',
+              cursor: isExecuting ? 'not-allowed' : 'pointer',
+              color: 'white',
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: isExecuting || !content.trim() ? 0.5 : 1,
+              transition: 'opacity 0.15s, background 0.15s',
+              flexShrink: 0,
+            }}
+            title="Generate response (Ctrl+Enter)"
+          >
+            <Send size={18} />
+          </button>
+        </div>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginTop: '6px',
+          padding: '0 2px',
+        }}>
+          <span style={{ fontSize: '10px', color: '#4B5563' }}>
+            Ctrl+Enter to send
+          </span>
+          {/* Quick-add child node button */}
+          {llmResponse && !isExecuting && onCreateChild && (
+            <button
+              onClick={() => onCreateChild(node.id)}
+              style={{
+                background: 'none',
+                border: '1px solid #2A2A40',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                color: '#6B7280',
+                padding: '2px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '10px',
+              }}
+              title="Create a new node to continue the conversation"
+            >
+              <Plus size={12} />
+              Continue
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Parent Context Block ───────────────────────────────────────────
+
+function ParentContextBlock({ prompt, response }: { prompt: string; response: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = response.length > 300;
+  const displayResponse = expanded ? response : (isLong ? response.substring(0, 300) + '...' : response);
+
+  return (
+    <div style={{
+      padding: '12px 16px',
+      borderBottom: '1px solid #2A2A40',
+      backgroundColor: '#1A1A25',
+    }}>
+      {/* Parent's prompt */}
+      {prompt && (
+        <div style={{
+          fontSize: '12px',
+          color: '#6B7280',
+          marginBottom: '6px',
+          fontStyle: 'italic',
+        }}>
+          {prompt.length > 100 ? prompt.substring(0, 100) + '...' : prompt}
+        </div>
+      )}
+      {/* Parent's response */}
+      <div style={{
+        fontSize: '13px',
+        color: '#9CA3AF',
+        lineHeight: '1.6',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+      }}>
+        {displayResponse}
+      </div>
+      {isLong && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: '#4FC3F7',
+            fontSize: '11px',
+            padding: '4px 0',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '2px',
+          }}
+        >
+          {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
       )}
     </div>
   );

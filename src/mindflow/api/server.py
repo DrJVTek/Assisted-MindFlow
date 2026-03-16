@@ -3,12 +3,18 @@
 This module provides REST API endpoints for the interactive node canvas interface.
 """
 
+import logging
 import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mindflow.api.routes import graphs, viewport, canvases, subgraphs, llm_operations, auth, import_conversations, providers, debates, mcp_connections
+from mindflow.api.routes import graphs, viewport, canvases, subgraphs, llm_operations, auth, import_conversations, providers, debates, mcp_connections, node_types, execution, composites
 from mindflow.api.demo_data import create_demo_graph
+from mindflow.plugins.registry import PluginRegistry
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="MindFlow Canvas API",
@@ -61,6 +67,35 @@ app.include_router(import_conversations.router, prefix="/api")
 app.include_router(providers.router, prefix="/api")
 app.include_router(debates.router, prefix="/api")
 app.include_router(mcp_connections.router, prefix="/api")
+app.include_router(node_types.router, prefix="/api")
+app.include_router(execution.router, prefix="/api")
+app.include_router(composites.router, prefix="/api")
+
+
+# ── Plugin system startup ──────────────────────────────────────
+@app.on_event("startup")
+async def _load_plugins() -> None:
+    """Discover and load all plugins at server startup."""
+    # Resolve plugin directories relative to project root
+    project_root = Path(__file__).resolve().parents[3]
+    plugin_dirs = [
+        str(project_root / "plugins" / "core"),
+        str(project_root / "plugins" / "community"),
+    ]
+
+    registry = PluginRegistry(plugin_dirs)
+    registry.discover_and_load()
+
+    # Wire into the node_types API route
+    node_types.set_plugin_registry(registry)
+
+    loaded_count = len(registry.node_classes)
+    plugin_count = len(registry.plugins)
+    logger.info(
+        "Plugin system ready: %d plugins, %d node types",
+        plugin_count,
+        loaded_count,
+    )
 
 
 @app.get("/")

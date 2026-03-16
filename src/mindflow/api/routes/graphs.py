@@ -1,4 +1,12 @@
-"""Graph API endpoints."""
+"""Graph API endpoints.
+
+Graphs are persisted as self-contained JSON files in data/graphs/.
+Each JSON file contains the complete workflow (nodes, connections, groups,
+comments) and can be exported, imported, or copy-pasted — ComfyUI style.
+
+In-memory cache (_graphs_storage) provides fast access; disk is the
+source of truth. Every mutation auto-saves to disk.
+"""
 
 import logging
 from fastapi import APIRouter, HTTPException, Query
@@ -12,57 +20,85 @@ from mindflow.models.group import Group, GroupKind, GroupMetadata
 from mindflow.models.comment import Comment, CommentTarget
 from mindflow.models.node_version import NodeVersion, TriggerReason
 from mindflow.utils.cascade import get_affected_nodes
-from mindflow.services.llm_service import LLMService
+from mindflow.api.routes.providers import _get_registry
 from mindflow.services.version_storage import get_version_storage
+from mindflow.services.graph_service import GraphService
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/graphs", tags=["graphs"])
 
+# Graph persistence service (disk)
+_graph_service = GraphService()
 
-# Temporary in-memory storage for development
+# In-memory cache for fast access (synced with disk)
 _graphs_storage: Dict[str, Graph] = {}
 
 
 # Helper functions for canvas integration
 def add_graph_to_storage(graph: Graph) -> None:
-    """Add a graph to in-memory storage.
-
-    Args:
-        graph: Graph instance to store
-    """
+    """Add a graph to in-memory cache AND persist to disk."""
     _graphs_storage[str(graph.id)] = graph
-    logger.info(f"Added graph {graph.id} to storage")
+    _graph_service.save(graph)
+    logger.info(f"Added graph {graph.id} to storage (memory + disk)")
 
 
 def get_graph_from_storage(graph_id: UUID) -> Graph | None:
-    """Get a graph from in-memory storage.
+    """Get a graph from memory cache, falling back to disk.
 
-    Args:
-        graph_id: UUID of graph to retrieve
-
-    Returns:
-        Graph instance if found, None otherwise
+    If found on disk but not in memory, loads into cache.
     """
-    return _graphs_storage.get(str(graph_id))
+    graph_id_str = str(graph_id)
+
+    # Try memory first
+    if graph_id_str in _graphs_storage:
+        return _graphs_storage[graph_id_str]
+
+    # Fall back to disk
+    graph = _graph_service.load(graph_id)
+    if graph is not None:
+        _graphs_storage[graph_id_str] = graph
+        logger.info(f"Loaded graph {graph_id} from disk into memory cache")
+        return graph
+
+    return None
 
 
 def delete_graph_from_storage(graph_id: UUID) -> bool:
-    """Delete a graph from in-memory storage.
-
-    Args:
-        graph_id: UUID of graph to delete
-
-    Returns:
-        True if deleted, False if not found
-    """
+    """Delete a graph from memory AND disk."""
     graph_id_str = str(graph_id)
-    if graph_id_str in _graphs_storage:
+    deleted_memory = graph_id_str in _graphs_storage
+    if deleted_memory:
         del _graphs_storage[graph_id_str]
-        logger.info(f"Deleted graph {graph_id} from storage")
+
+    deleted_disk = _graph_service.delete(graph_id)
+
+    if deleted_memory or deleted_disk:
+        logger.info(f"Deleted graph {graph_id} (memory={deleted_memory}, disk={deleted_disk})")
         return True
     return False
+
+
+def _ensure_graph_loaded(graph_id: str) -> None:
+    """Ensure graph is in memory cache, loading from disk if needed.
+
+    Call at the start of any endpoint that accesses _graphs_storage directly.
+    """
+    if graph_id not in _graphs_storage:
+        graph = _graph_service.load(UUID(graph_id))
+        if graph is not None:
+            _graphs_storage[graph_id] = graph
+
+
+def _persist_graph(graph_id: str) -> None:
+    """Persist current in-memory graph state to disk.
+
+    Called after every mutation (create/update/delete node, group, comment).
+    """
+    graph = _graphs_storage.get(graph_id)
+    if graph is not None:
+        _graph_service.save(graph)
 
 
 # Request/Response Models
@@ -80,6 +116,13 @@ class CreateNodeRequest(BaseModel):
     provider_id: str | None = None
 
 
+class ConnectionSpec(BaseModel):
+    """A named port connection from a source node's output to this node's input."""
+    input_name: str
+    source_node_id: str
+    output_name: str
+
+
 class UpdateNodeRequest(BaseModel):
     """Request body for updating an existing node."""
     content: str | None = Field(None, min_length=0, max_length=10000)
@@ -88,9 +131,15 @@ class UpdateNodeRequest(BaseModel):
     status: NodeStatus | None = None
     position: Position | None = None
 
+    # Parent/child relationship (set when creating edges)
+    parent_id: str | None = None
+
+    # Named port connection (ComfyUI-style: input_name → source_node.output_name)
+    connection: ConnectionSpec | None = None
+
     # Feature 009: Inline LLM Response Display
     llm_response: str | None = Field(None, max_length=100000)
-    
+
     # Inline LLM Workflow fields
     llm_status: str | None = None
     llm_error: str | None = None
@@ -124,26 +173,17 @@ async def get_graph(graph_id: str) -> Graph:
     """
     logger.info(f"GET /api/graphs/{graph_id}")
 
-    if graph_id not in _graphs_storage:
-        logger.warning(f"Graph not found in memory: {graph_id}. Creating new empty graph for recovery.")
-        # Create a new empty graph with the requested ID to recover from restart
-        # This is a temporary fix until we implement graph persistence
-        
-        # Try to find associated canvas name if possible, otherwise use default
-        graph_name = "Recovered Graph"
-        
-        new_graph = Graph(
+    graph = get_graph_from_storage(UUID(graph_id))
+    if graph is None:
+        # Auto-create empty graph when referenced by a canvas but never persisted
+        # (migration path: canvases created before disk-backed graph storage)
+        logger.info(f"Graph {graph_id} not found — creating empty graph (migration)")
+        graph = Graph(
             id=UUID(graph_id),
-            meta=GraphMetadata(name=graph_name),
-            nodes={},
-            groups={},
-            comments={},
-            subgraph_instances={},
+            meta=GraphMetadata(name="Migrated Graph"),
         )
-        _graphs_storage[graph_id] = new_graph
-        return new_graph
+        add_graph_to_storage(graph)
 
-    graph = _graphs_storage[graph_id]
     logger.info(f"Retrieved graph {graph_id} with {len(graph.nodes)} nodes")
     return graph
 
@@ -167,6 +207,7 @@ async def get_graph_nodes(
     Raises:
         HTTPException: 404 if graph not found
     """
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -185,16 +226,6 @@ async def get_graph_nodes(
     return {"nodes": nodes_dict, "total": total, "limit": limit, "offset": offset}
 
 
-# Helper function to add a graph to storage (for development/testing)
-def add_graph_to_storage(graph: Graph) -> None:
-    """Add a graph to in-memory storage.
-
-    Args:
-        graph: Graph object to store
-    """
-    _graphs_storage[str(graph.id)] = graph
-
-
 @router.post("/{graph_id}/nodes", status_code=201)
 async def create_node(graph_id: str, node_req: CreateNodeRequest) -> Node:
     """Create a new node in the graph.
@@ -211,6 +242,7 @@ async def create_node(graph_id: str, node_req: CreateNodeRequest) -> Node:
     """
     logger.info(f"POST /api/graphs/{graph_id}/nodes - type={node_req.type}")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -266,6 +298,9 @@ async def create_node(graph_id: str, node_req: CreateNodeRequest) -> Node:
     # Update graph timestamp
     graph.meta.updated_at = new_node.meta.created_at
 
+    # Persist graph to disk
+    _persist_graph(graph_id)
+
     logger.info(f"Created node {new_node.id} of type {new_node.type}")
     return new_node
 
@@ -289,6 +324,7 @@ async def update_node(
     """
     logger.info(f"PUT /api/graphs/{graph_id}/nodes/{node_id}")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -356,9 +392,42 @@ async def update_node(
     if update_req.mcp_tools is not None:
         node.mcp_tools = update_req.mcp_tools
 
+    # Add parent relationship (edge creation via onConnect)
+    if update_req.parent_id is not None:
+        try:
+            parent_uuid = UUID(update_req.parent_id)
+            if parent_uuid in graph.nodes:
+                if parent_uuid not in node.parents:
+                    node.parents.append(parent_uuid)
+                parent_node = graph.nodes[parent_uuid]
+                if node_uuid not in parent_node.children:
+                    parent_node.children.append(node_uuid)
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Parent node {update_req.parent_id} not found in graph",
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid parent_id UUID: {update_req.parent_id}"
+            )
+
+    # Named port connection (ComfyUI-style)
+    if update_req.connection is not None:
+        conn = update_req.connection
+        if not hasattr(node, "connections") or node.connections is None:
+            node.connections = {}
+        node.connections[conn.input_name] = {
+            "source_node_id": conn.source_node_id,
+            "output_name": conn.output_name,
+        }
+
     # Update timestamp
     node.update_timestamp()
     graph.meta.updated_at = node.meta.updated_at
+
+    # Persist graph to disk
+    _persist_graph(graph_id)
 
     logger.info(f"Updated node {node_id}")
 
@@ -387,6 +456,7 @@ async def delete_node(graph_id: str, node_id: str) -> None:
     """
     logger.info(f"DELETE /api/graphs/{graph_id}/nodes/{node_id}")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -430,6 +500,9 @@ async def delete_node(graph_id: str, node_id: str) -> None:
 
     graph.meta.updated_at = datetime.now(UTC)
 
+    # Persist graph to disk
+    _persist_graph(graph_id)
+
     logger.info(f"Deleted node {node_id} from graph {graph_id}")
 
     # Mark versions as deleted (soft delete - keep for recovery)
@@ -460,6 +533,7 @@ async def get_node_versions(graph_id: str, node_id: str) -> List[NodeVersion]:
     """
     logger.info(f"GET /api/graphs/{graph_id}/nodes/{node_id}/versions")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -518,6 +592,7 @@ async def restore_node_version(
         f"POST /api/graphs/{graph_id}/nodes/{node_id}/versions/{version_id}/restore"
     )
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -650,6 +725,7 @@ async def regenerate_cascade(
     """
     logger.info(f"POST /api/graphs/{graph_id}/regenerate-cascade - node={request.modified_node_id}")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -690,8 +766,19 @@ async def regenerate_cascade(
         f"Found {len(affected_node_ids)} nodes to regenerate in cascade order"
     )
 
-    # Initialize LLM service
-    llm_service = LLMService(provider=request.llm_provider, model=request.llm_model)
+    # Resolve provider from registry
+    registry = _get_registry()
+    provider = None
+    for p_config in registry.list_providers():
+        if p_config.type.value == request.llm_provider:
+            provider = registry.get_provider_instance(str(p_config.id))
+            if provider:
+                break
+    if provider is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{request.llm_provider}' not configured. Add it in Provider Settings.",
+        )
 
     # Regenerate each node in order
     regenerated_count = 0
@@ -711,12 +798,21 @@ async def regenerate_cascade(
             # Store previous content
             previous_content = node.content
 
-            # Generate new content using LLM
-            new_content = llm_service.generate_node_content(
-                node_type=node.type,
-                parent_nodes=parent_nodes,
-                previous_content=previous_content,
+            # Build context from parents and generate
+            context_parts = []
+            for i, parent in enumerate(parent_nodes, 1):
+                context_parts.append(f"Parent Node {i} ({parent.type}):\n{parent.content}\n")
+            context_text = "\n".join(context_parts)
+            prompt = f"Context:\n{context_text}\n\n"
+            if previous_content:
+                prompt += f"Previous Content:\n{previous_content}\n\n"
+            prompt += f"Generate content for a {node.type} node based on the context."
+
+            response = await provider.generate(
+                prompt=prompt,
+                model=request.llm_model,
             )
+            new_content = response.content
 
             # Update node
             node.content = new_content
@@ -746,6 +842,7 @@ async def regenerate_cascade(
     # Update graph timestamp
     from datetime import UTC, datetime
     graph.meta.updated_at = datetime.now(UTC)
+    _persist_graph(graph_id)
 
     success = regenerated_count > 0 and len(errors) == 0
     message = (
@@ -787,6 +884,7 @@ async def create_group(graph_id: str, group_req: CreateGroupRequest) -> Group:
     """
     logger.info(f"POST /api/graphs/{graph_id}/groups - label={group_req.label}")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -846,6 +944,7 @@ async def create_group(graph_id: str, group_req: CreateGroupRequest) -> Group:
     # Update graph timestamp
     from datetime import UTC, datetime
     graph.meta.updated_at = datetime.now(UTC)
+    _persist_graph(graph_id)
 
     logger.info(f"Created group {new_group.id} with label '{new_group.label}'")
     return new_group
@@ -870,6 +969,7 @@ async def update_group(
     """
     logger.info(f"PUT /api/graphs/{graph_id}/groups/{group_id}")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -917,6 +1017,7 @@ async def update_group(
     # Update graph timestamp
     from datetime import UTC, datetime
     graph.meta.updated_at = datetime.now(UTC)
+    _persist_graph(graph_id)
 
     logger.info(f"Updated group {group_id}")
     return group
@@ -935,6 +1036,7 @@ async def delete_group(graph_id: str, group_id: str) -> None:
     """
     logger.info(f"DELETE /api/graphs/{graph_id}/groups/{group_id}")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -963,6 +1065,7 @@ async def delete_group(graph_id: str, group_id: str) -> None:
     # Update graph timestamp
     from datetime import UTC, datetime
     graph.meta.updated_at = datetime.now(UTC)
+    _persist_graph(graph_id)
 
     logger.info(f"Deleted group {group_id} from graph {graph_id}")
     return None
@@ -988,6 +1091,7 @@ async def create_comment(graph_id: str, comment_req: CreateCommentRequest) -> Co
     """
     logger.info(f"POST /api/graphs/{graph_id}/comments - author={comment_req.author}")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -1053,6 +1157,7 @@ async def create_comment(graph_id: str, comment_req: CreateCommentRequest) -> Co
     # Update graph timestamp
     from datetime import UTC, datetime
     graph.meta.updated_at = datetime.now(UTC)
+    _persist_graph(graph_id)
 
     logger.info(f"Created comment {new_comment.id}")
     return new_comment
@@ -1077,6 +1182,7 @@ async def update_comment(
     """
     logger.info(f"PUT /api/graphs/{graph_id}/comments/{comment_id}")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -1104,6 +1210,7 @@ async def update_comment(
     # Update graph timestamp
     from datetime import UTC, datetime
     graph.meta.updated_at = datetime.now(UTC)
+    _persist_graph(graph_id)
 
     logger.info(f"Updated comment {comment_id}")
     return comment
@@ -1122,6 +1229,7 @@ async def delete_comment(graph_id: str, comment_id: str) -> None:
     """
     logger.info(f"DELETE /api/graphs/{graph_id}/comments/{comment_id}")
 
+    _ensure_graph_loaded(graph_id)
     if graph_id not in _graphs_storage:
         raise HTTPException(
             status_code=404, detail=f"Graph with ID {graph_id} not found"
@@ -1147,6 +1255,7 @@ async def delete_comment(graph_id: str, comment_id: str) -> None:
     # Update graph timestamp
     from datetime import UTC, datetime
     graph.meta.updated_at = datetime.now(UTC)
+    _persist_graph(graph_id)
 
     logger.info(f"Deleted comment {comment_id} from graph {graph_id}")
     return None
@@ -1240,8 +1349,78 @@ async def summarize_group(graph_id: str, request: SummarizeGroupRequest):
         if parent and summary_node.id not in parent.children:
             parent.children.append(summary_node.id)
 
+    # Persist graph to disk
+    _persist_graph(graph_id)
+
     return SummarizeGroupResponse(
         summary_node_id=str(summary_node.id),
         content=summary,
         message=f"Summary generated from {len(request.node_ids)} nodes",
     )
+
+
+# ============================================================================
+# EXPORT / IMPORT (ComfyUI-style JSON workflows)
+# ============================================================================
+
+
+@router.get("/{graph_id}/export")
+async def export_graph(graph_id: str):
+    """Export graph as self-contained JSON (copy-paste ready).
+
+    Returns the complete graph JSON that can be shared, imported,
+    or pasted into another MindFlow instance.
+    """
+    graph = get_graph_from_storage(UUID(graph_id))
+    if graph is None:
+        raise HTTPException(status_code=404, detail=f"Graph {graph_id} not found")
+
+    from fastapi.responses import JSONResponse
+    import json
+
+    return JSONResponse(
+        content=json.loads(graph.to_json()),
+        headers={"Content-Disposition": f'attachment; filename="graph-{graph_id[:8]}.json"'},
+    )
+
+
+class ImportGraphRequest(BaseModel):
+    """Request body for importing a graph from JSON."""
+    graph_json: dict = Field(description="Complete graph JSON object")
+    new_name: str | None = Field(None, description="Optional new name for the imported graph")
+
+
+@router.post("/import", status_code=201)
+async def import_graph(request: ImportGraphRequest):
+    """Import a graph from JSON (pasted or uploaded).
+
+    Creates a new graph from the provided JSON. The graph keeps its
+    internal structure (node IDs, connections) but gets stored as-is.
+
+    Use this for:
+    - Pasting a shared workflow
+    - Importing a saved graph backup
+    - Loading an "arbre mort" (dead tree) to extend
+    """
+    import json
+
+    try:
+        json_str = json.dumps(request.graph_json)
+        graph = Graph.from_json(json_str)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid graph JSON: {e}")
+
+    # Optionally rename
+    if request.new_name:
+        graph.meta.name = request.new_name
+
+    # Store in memory and disk
+    add_graph_to_storage(graph)
+
+    logger.info(f"Imported graph {graph.id} with {len(graph.nodes)} nodes")
+    return {
+        "graph_id": str(graph.id),
+        "name": graph.meta.name,
+        "node_count": len(graph.nodes),
+        "message": f"Imported graph with {len(graph.nodes)} nodes",
+    }

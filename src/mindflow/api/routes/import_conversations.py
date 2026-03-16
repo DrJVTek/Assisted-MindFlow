@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from mindflow.api.routes.graphs import _graphs_storage
-from mindflow.models.conversation import ConversationSummary
+from mindflow.models.conversation import ConversationSummary, ProjectSummary
 from mindflow.services.chatgpt_client import ChatGPTClient
 from mindflow.services.conversation_import import ConversationImporter
 
@@ -141,6 +141,46 @@ async def delete_access_token():
     )
 
 
+# ── Project Endpoints ────────────────────────────────────────────
+
+@router.get("/chatgpt/projects", response_model=list[ProjectSummary])
+async def list_chatgpt_projects():
+    """List the user's ChatGPT projects (folders)."""
+    client = _get_client()
+
+    try:
+        return await client.list_projects()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+
+@router.get(
+    "/chatgpt/projects/{project_id}/conversations",
+    response_model=ConversationListResponse,
+)
+async def list_project_conversations(
+    project_id: str,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(28, ge=1, le=100),
+):
+    """List conversations within a specific ChatGPT project."""
+    client = _get_client()
+
+    try:
+        summaries, total = await client.list_project_conversations(
+            project_id=project_id, offset=offset, limit=limit,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+
+    return ConversationListResponse(
+        conversations=summaries,
+        total=total,
+        offset=offset,
+        limit=limit,
+    )
+
+
 # ── Conversation Endpoints ──────────────────────────────────────
 
 @router.get("/chatgpt/conversations", response_model=ConversationListResponse)
@@ -178,10 +218,12 @@ async def preview_chatgpt_conversation(conversation_id: str):
         status = 401 if "sign in" in str(exc).lower() else 404
         raise HTTPException(status_code=status, detail=str(exc))
 
-    # Build preview: linearized messages with branch info
+    # Build preview: only user/assistant messages with actual content
     linear = conversation.linearize()
     preview_msgs = []
     for msg in linear:
+        if msg.role not in ("user", "assistant") or not msg.content or not msg.content.strip():
+            continue
         has_branches = len(msg.children_ids) > 1
         content_preview = msg.content[:200] + "..." if len(msg.content) > 200 else msg.content
         preview_msgs.append({
@@ -194,7 +236,7 @@ async def preview_chatgpt_conversation(conversation_id: str):
         id=conversation.id,
         title=conversation.title,
         source=conversation.source,
-        message_count=len(linear),
+        message_count=len(preview_msgs),
         messages=preview_msgs,
     )
 
@@ -202,9 +244,19 @@ async def preview_chatgpt_conversation(conversation_id: str):
 @router.post("/chatgpt/import", response_model=ImportResponse)
 async def import_chatgpt_conversation(req: ImportRequest):
     """Import a ChatGPT conversation into a MindFlow graph as a group of nodes."""
-    # Validate graph exists
+    # Load graph (auto-create if not in memory, matching graph GET behavior)
     if req.graph_id not in _graphs_storage:
-        raise HTTPException(status_code=404, detail=f"Graph {req.graph_id} not found")
+        from uuid import UUID as _UUID
+        from mindflow.models.graph import Graph, GraphMetadata
+        new_graph = Graph(
+            id=_UUID(req.graph_id),
+            meta=GraphMetadata(name="Recovered Graph"),
+            nodes={},
+            groups={},
+            comments={},
+            subgraph_instances={},
+        )
+        _graphs_storage[req.graph_id] = new_graph
 
     graph = _graphs_storage[req.graph_id]
     client = _get_client()

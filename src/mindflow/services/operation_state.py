@@ -137,8 +137,7 @@ class OperationStateManager:
 
     async def _create_sqlite(self, op: LLMOperation):
         """Insert into SQLite."""
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._sqlite_insert, op)
+        await asyncio.to_thread(self._sqlite_insert, op)
 
     def _sqlite_insert(self, op: LLMOperation):
         with sqlite3.connect(self.sqlite_path) as conn:
@@ -205,8 +204,7 @@ class OperationStateManager:
             return await self._get_postgres(operation_id)
 
     async def _get_sqlite(self, op_id: UUID) -> Optional[LLMOperation]:
-        loop = asyncio.get_event_loop()
-        row = await loop.run_in_executor(None, self._sqlite_select, op_id)
+        row = await asyncio.to_thread(self._sqlite_select, op_id)
         if not row:
             return None
         return self._tuple_to_operation(row)
@@ -238,11 +236,9 @@ class OperationStateManager:
             return await self._list_postgres(graph_id, node_id, user_id, status, limit)
 
     async def _list_sqlite(self, graph_id, node_id, user_id, status, limit):
-        loop = asyncio.get_event_loop()
-        rows = await loop.run_in_executor(
-            None, 
-            self._sqlite_list_sync, 
-            graph_id, node_id, user_id, status, limit
+        rows = await asyncio.to_thread(
+            self._sqlite_list_sync,
+            graph_id, node_id, user_id, status, limit,
         )
         return [self._tuple_to_operation(row) for row in rows]
 
@@ -305,8 +301,7 @@ class OperationStateManager:
     async def append_content(self, operation_id: UUID, token: str) -> None:
         """Append token to content."""
         if self.local_mode:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._sqlite_append, operation_id, token)
+            await asyncio.to_thread(self._sqlite_append, operation_id, token)
         else:
             query = """
                 UPDATE llm_operations
@@ -340,8 +335,7 @@ class OperationStateManager:
         now = datetime.now(UTC)
         
         if self.local_mode:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._sqlite_update_status, operation_id, status, progress, now)
+            await asyncio.to_thread(self._sqlite_update_status, operation_id, status, progress, now)
         else:
             # Postgres implementation
             updates = ["status = $2"]
@@ -388,8 +382,7 @@ class OperationStateManager:
         """Complete operation."""
         now = datetime.now(UTC)
         if self.local_mode:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._sqlite_complete, operation_id, tokens_used, cost, now)
+            await asyncio.to_thread(self._sqlite_complete, operation_id, tokens_used, cost, now)
         else:
             updates = [
                 "status = $2",
@@ -425,8 +418,7 @@ class OperationStateManager:
         """Fail operation."""
         now = datetime.now(UTC)
         if self.local_mode:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._sqlite_fail, operation_id, error_message, now)
+            await asyncio.to_thread(self._sqlite_fail, operation_id, error_message, now)
         else:
             updates = [
                 "status = $2",
@@ -450,8 +442,7 @@ class OperationStateManager:
         """Cancel operation."""
         now = datetime.now(UTC)
         if self.local_mode:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._sqlite_cancel, operation_id, now)
+            await asyncio.to_thread(self._sqlite_cancel, operation_id, now)
         else:
             query = """
                 UPDATE llm_operations
@@ -486,13 +477,7 @@ class OperationStateManager:
             }
 
     async def _get_cached_operation(self, operation_id: UUID) -> Optional[LLMOperation]:
-        if self.redis:
-            # Redis implementation
-            return None
-        elif self.local_mode:
-            data = self._local_cache.get(str(operation_id))
-            # Return None to force DB fetch for full object
-            return None 
+        # Cache stores partial data only; always fetch from DB for full objects.
         return None
 
     async def _invalidate_cache(self, operation_id: UUID):

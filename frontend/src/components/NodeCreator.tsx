@@ -1,449 +1,432 @@
 /**
- * Node Creator Modal
+ * ComfyUI-style Node Picker
  *
- * Allows users to create new nodes with:
- * - Type selection (question, answer, hypothesis, etc.)
- * - Content textarea (up to 10,000 characters)
- * - Importance slider (0-100%)
- * - Tags input (comma-separated)
- * - Status dropdown
+ * Searchable palette that lists available node types grouped by category.
+ * Right-click canvas → picker appears at cursor → click node type → node placed on canvas.
+ * No form fields — nodes are configured in the DetailPanel after placement.
  */
 
-import React, { useState, useCallback } from 'react';
-import { X, AlertCircle } from 'lucide-react';
-import { ProviderSelector } from './ProviderSelector';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { Search, ChevronRight, X } from 'lucide-react';
+import { useNodeTypes } from '../hooks/useNodeTypes';
+import type { NodeTypeDefinition } from '../types/plugin';
 
-export type NodeType =
-  | 'question'
-  | 'answer'
-  | 'note'
-  | 'hypothesis'
-  | 'evaluation'
-  | 'summary'
-  | 'plan'
-  | 'group_meta'
-  | 'comment'
-  | 'stop';
-
-export type NodeStatus = 'draft' | 'valid' | 'invalid' | 'final' | 'experimental';
-
-interface NodeCreatorProps {
+export interface NodeCreatorProps {
   onClose: () => void;
-  onSave: (nodeData: {
-    type: NodeType;
-    content: string;
-    importance: number;
-    tags: string[];
-    status: NodeStatus;
-    parentId?: string;
-    provider_id?: string | null;
-  }) => void;
-  parentId?: string; // If creating a child node
+  onSelect: (classType: string) => void;
+  /** Screen position where the picker should appear */
+  position?: { x: number; y: number };
+  parentId?: string;
 }
 
-export function NodeCreator({ onClose, onSave, parentId }: NodeCreatorProps) {
-  const [type, setType] = useState<NodeType>('question');
-  const [content, setContent] = useState('');
-  const [importance, setImportance] = useState(50);
-  const [tags, setTags] = useState('');
-  const [status, setStatus] = useState<NodeStatus>('draft');
-  const [providerId, setProviderId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<{ content?: string }>({});
+// Category display configuration
+const CATEGORY_ICONS: Record<string, string> = {
+  llm: '🤖',
+  input: '📝',
+  output: '📤',
+  transform: '🔄',
+  community: '🌐',
+};
 
-  const validate = useCallback(() => {
-    const newErrors: { content?: string } = {};
+function getCategoryIcon(category: string): string {
+  const root = category.split('/')[0];
+  return CATEGORY_ICONS[root] || '⚡';
+}
 
-    if (content.trim().length === 0) {
-      newErrors.content = 'Content is required';
-    } else if (content.length > 10000) {
-      newErrors.content = 'Content must be 10,000 characters or less';
+function getCategoryDisplayName(category: string): string {
+  return category
+    .split('/')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' › ');
+}
+
+export function NodeCreator({ onClose, onSelect, position, parentId }: NodeCreatorProps) {
+  const { nodeTypes, isLoaded, isLoading } = useNodeTypes();
+  const [search, setSearch] = useState('');
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+
+  // Auto-focus search on open
+  useEffect(() => {
+    searchRef.current?.focus();
+  }, []);
+
+  // Close on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', handleClickOutside), 0);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [onClose]);
+
+  // Group node types by root category
+  const categorized = useMemo(() => {
+    const groups: Record<string, Array<{ classType: string; def: NodeTypeDefinition }>> = {};
+
+    for (const [classType, def] of Object.entries(nodeTypes)) {
+      const category = def.category || 'uncategorized';
+      const root = category.split('/')[0];
+      if (!groups[root]) groups[root] = [];
+      groups[root].push({ classType, def });
     }
 
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  }, [content]);
-
-  const handleSave = useCallback(() => {
-    if (!validate()) {
-      return;
-    }
-
-    const tagsArray = tags
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter((tag) => tag.length > 0);
-
-    onSave({
-      type,
-      content: content.trim(),
-      importance: importance / 100, // Convert 0-100 to 0.0-1.0
-      tags: tagsArray,
-      status,
-      parentId,
-      provider_id: providerId,
+    const order = ['llm', 'input', 'output', 'transform'];
+    return Object.entries(groups).sort(([a], [b]) => {
+      const ai = order.indexOf(a);
+      const bi = order.indexOf(b);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.localeCompare(b);
     });
+  }, [nodeTypes]);
 
-    onClose();
-  }, [type, content, importance, tags, status, parentId, onSave, onClose, validate]);
+  // Filtered results when searching
+  const filteredItems = useMemo(() => {
+    if (!search.trim()) return null;
+    const q = search.toLowerCase();
+    const results: Array<{ classType: string; def: NodeTypeDefinition }> = [];
+    for (const [classType, def] of Object.entries(nodeTypes)) {
+      const searchable = `${def.display_name} ${classType} ${def.category}`.toLowerCase();
+      if (searchable.includes(q)) {
+        results.push({ classType, def });
+      }
+    }
+    return results;
+  }, [search, nodeTypes]);
+
+  // Flat list for keyboard navigation
+  const flatItems = useMemo(() => {
+    if (filteredItems) return filteredItems;
+    const items: Array<{ classType: string; def: NodeTypeDefinition }> = [];
+    for (const [category, entries] of categorized) {
+      if (expandedCategories.has(category)) {
+        items.push(...entries);
+      }
+    }
+    return items;
+  }, [filteredItems, categorized, expandedCategories]);
+
+  // Reset selection on search change
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [search]);
+
+  const handleSelect = useCallback(
+    (classType: string) => {
+      onSelect(classType);
+      onClose();
+    },
+    [onSelect, onClose]
+  );
+
+  const toggleCategory = useCallback((category: string) => {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      // Ctrl+Enter or Cmd+Enter to save
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        e.preventDefault();
-        handleSave();
-      }
-      // Escape to cancel
       if (e.key === 'Escape') {
         onClose();
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex((i) => Math.min(i + 1, flatItems.length - 1));
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex((i) => Math.max(i - 1, 0));
+      }
+      if (e.key === 'Enter' && flatItems[selectedIndex]) {
+        e.preventDefault();
+        handleSelect(flatItems[selectedIndex].classType);
       }
     },
-    [handleSave, onClose]
+    [onClose, flatItems, selectedIndex, handleSelect]
   );
+
+  // Scroll selected item into view
+  useEffect(() => {
+    const el = itemRefs.current.get(selectedIndex);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [selectedIndex]);
+
+  // Position calculation — keep within viewport
+  const pickerStyle = useMemo(() => {
+    const width = 280;
+    const maxHeight = 420;
+    let x = position?.x ?? window.innerWidth / 2 - width / 2;
+    let y = position?.y ?? window.innerHeight / 2 - maxHeight / 2;
+
+    if (x + width > window.innerWidth - 10) x = window.innerWidth - width - 10;
+    if (y + maxHeight > window.innerHeight - 10) y = window.innerHeight - maxHeight - 10;
+    if (x < 10) x = 10;
+    if (y < 10) y = 10;
+
+    return { left: x, top: y, width, maxHeight };
+  }, [position]);
+
+  // Render a node type item
+  const renderItem = (
+    item: { classType: string; def: NodeTypeDefinition },
+    _index: number,
+    globalIndex: number
+  ) => {
+    const { classType, def } = item;
+    const color = def.ui?.color || '#546E7A';
+    const isSelected = globalIndex === selectedIndex;
+    const ports = def.return_types?.length || 0;
+    const inputs = Object.keys(def.inputs?.required || {}).length;
+
+    return (
+      <button
+        key={classType}
+        ref={(el) => {
+          if (el) itemRefs.current.set(globalIndex, el);
+          else itemRefs.current.delete(globalIndex);
+        }}
+        onClick={() => handleSelect(classType)}
+        onMouseEnter={() => setSelectedIndex(globalIndex)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '6px 10px',
+          border: 'none',
+          background: isSelected ? 'var(--panel-bg-secondary)' : 'transparent',
+          color: 'var(--node-text)',
+          cursor: 'pointer',
+          borderRadius: '4px',
+          fontSize: '12px',
+          textAlign: 'left',
+          transition: 'background 0.1s',
+        }}
+      >
+        <span
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: '2px',
+            backgroundColor: color,
+            flexShrink: 0,
+          }}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontWeight: 500,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {def.display_name}
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--node-text-secondary)', marginTop: '1px' }}>
+            {inputs > 0 && `${inputs} in`}
+            {inputs > 0 && ports > 0 && ' · '}
+            {ports > 0 && `${ports} out`}
+            {def.streaming && ' · stream'}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  let globalIndex = 0;
 
   return (
     <div
+      ref={containerRef}
+      onKeyDown={handleKeyDown}
       style={{
         position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        left: pickerStyle.left,
+        top: pickerStyle.top,
+        width: pickerStyle.width,
+        maxHeight: pickerStyle.maxHeight,
+        backgroundColor: 'var(--panel-bg)',
+        border: '1px solid var(--panel-border)',
+        borderRadius: '8px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 2000,
+        flexDirection: 'column',
+        overflow: 'hidden',
+        zIndex: 9999,
+        fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose();
-        }
-      }}
-      onKeyDown={handleKeyDown}
     >
+      {/* Search header */}
       <div
         style={{
-          backgroundColor: 'var(--panel-bg)',
-          borderRadius: '12px',
-          width: '90%',
-          maxWidth: '600px',
-          maxHeight: '90vh',
+          padding: '8px',
+          borderBottom: '1px solid var(--panel-border)',
           display: 'flex',
-          flexDirection: 'column',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
+          alignItems: 'center',
+          gap: '6px',
         }}
-        onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div
+        <Search size={14} style={{ color: 'var(--node-text-secondary)', flexShrink: 0 }} />
+        <input
+          ref={searchRef}
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search nodes..."
           style={{
-            padding: 'var(--spacing-lg)',
-            borderBottom: '1px solid var(--panel-border)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
+            flex: 1,
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--node-text)',
+            fontSize: '13px',
+            outline: 'none',
+            padding: '4px 0',
           }}
-        >
-          <h2
-            style={{
-              margin: 0,
-              fontSize: '20px',
-              fontWeight: 600,
-              color: 'var(--node-text)',
-            }}
-          >
-            {parentId ? 'Create Child Node' : 'Create New Node'}
-          </h2>
+        />
+        {search && (
           <button
-            onClick={onClose}
+            onClick={() => setSearch('')}
             style={{
               background: 'none',
               border: 'none',
               cursor: 'pointer',
-              padding: '4px',
+              padding: '2px',
               display: 'flex',
-              alignItems: 'center',
               color: 'var(--node-text-secondary)',
             }}
-            aria-label="Close"
           >
-            <X size={20} />
+            <X size={12} />
           </button>
-        </div>
+        )}
+      </div>
 
-        {/* Form Content */}
-        <div
-          style={{
-            flex: 1,
-            overflow: 'auto',
-            padding: 'var(--spacing-lg)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--spacing-lg)',
-          }}
-        >
-          {/* Node Type */}
-          <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: 500,
-                color: 'var(--node-text)',
-                marginBottom: 'var(--spacing-sm)',
-              }}
-            >
-              Node Type *
-            </label>
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value as NodeType)}
-              style={{
-                width: '100%',
-                padding: 'var(--spacing-md)',
-                fontSize: '14px',
-                borderRadius: '6px',
-                border: '1px solid var(--panel-border)',
-                backgroundColor: 'var(--panel-bg)',
-                color: 'var(--node-text)',
-              }}
-            >
-              <option value="question">Question</option>
-              <option value="answer">Answer</option>
-              <option value="note">Note</option>
-              <option value="hypothesis">Hypothesis</option>
-              <option value="evaluation">Evaluation</option>
-              <option value="summary">Summary</option>
-              <option value="plan">Plan</option>
-            </select>
+      {/* Node list */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '4px',
+        }}
+      >
+        {isLoading && (
+          <div style={{ padding: '16px', textAlign: 'center', color: 'var(--node-text-secondary)', fontSize: '12px' }}>
+            Loading node types...
           </div>
+        )}
 
-          {/* Content */}
-          <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: 500,
-                color: 'var(--node-text)',
-                marginBottom: 'var(--spacing-sm)',
-              }}
-            >
-              Content * ({content.length}/10,000)
-            </label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Enter node content here... (you can paste LLM prompts or responses)"
-              style={{
-                width: '100%',
-                minHeight: '200px',
-                padding: 'var(--spacing-md)',
-                fontSize: '14px',
-                borderRadius: '6px',
-                border: `1px solid ${errors.content ? '#d32f2f' : 'var(--panel-border)'}`,
-                backgroundColor: 'var(--panel-bg)',
-                color: 'var(--node-text)',
-                fontFamily: 'inherit',
-                resize: 'vertical',
-              }}
-            />
-            {errors.content && (
+        {isLoaded && Object.keys(nodeTypes).length === 0 && (
+          <div style={{ padding: '16px', textAlign: 'center', color: 'var(--node-text-secondary)', fontSize: '12px' }}>
+            No node types available
+          </div>
+        )}
+
+        {/* Search results */}
+        {filteredItems && (
+          <>
+            {filteredItems.length === 0 ? (
               <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--spacing-sm)',
-                  marginTop: 'var(--spacing-sm)',
-                  color: '#d32f2f',
-                  fontSize: '13px',
+                  padding: '16px',
+                  textAlign: 'center',
+                  color: 'var(--node-text-secondary)',
+                  fontSize: '12px',
                 }}
               >
-                <AlertCircle size={14} />
-                <span>{errors.content}</span>
+                No matches for "{search}"
               </div>
+            ) : (
+              filteredItems.map((item, i) => renderItem(item, i, i))
             )}
-          </div>
+          </>
+        )}
 
-          {/* Importance Slider */}
-          <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: 500,
-                color: 'var(--node-text)',
-                marginBottom: 'var(--spacing-sm)',
-              }}
-            >
-              Importance: {importance}%
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={importance}
-              onChange={(e) => setImportance(Number(e.target.value))}
-              style={{
-                width: '100%',
-                accentColor: 'var(--primary-color)',
-              }}
-            />
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: '12px',
-                color: 'var(--node-text-secondary)',
-                marginTop: 'var(--spacing-xs)',
-              }}
-            >
-              <span>Low</span>
-              <span>High</span>
-            </div>
-          </div>
+        {/* Category browser (when not searching) */}
+        {!filteredItems &&
+          categorized.map(([category, entries]) => {
+            const isExpanded = expandedCategories.has(category);
+            const startIndex = globalIndex;
 
-          {/* Tags */}
-          <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: 500,
-                color: 'var(--node-text)',
-                marginBottom: 'var(--spacing-sm)',
-              }}
-            >
-              Tags (comma-separated)
-            </label>
-            <input
-              type="text"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="e.g., research, hypothesis, important"
-              style={{
-                width: '100%',
-                padding: 'var(--spacing-md)',
-                fontSize: '14px',
-                borderRadius: '6px',
-                border: '1px solid var(--panel-border)',
-                backgroundColor: 'var(--panel-bg)',
-                color: 'var(--node-text)',
-              }}
-            />
-          </div>
+            return (
+              <div key={category}>
+                <button
+                  onClick={() => toggleCategory(category)}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 8px',
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--node-text-secondary)',
+                    cursor: 'pointer',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                    textAlign: 'left',
+                  }}
+                >
+                  <ChevronRight
+                    size={12}
+                    style={{
+                      transform: isExpanded ? 'rotate(90deg)' : 'none',
+                      transition: 'transform 0.15s',
+                    }}
+                  />
+                  <span>{getCategoryIcon(category)}</span>
+                  <span>{getCategoryDisplayName(category)}</span>
+                  <span style={{ color: 'var(--node-text-muted)', marginLeft: 'auto', fontSize: '10px' }}>
+                    {entries.length}
+                  </span>
+                </button>
 
-          {/* Status */}
-          <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: 500,
-                color: 'var(--node-text)',
-                marginBottom: 'var(--spacing-sm)',
-              }}
-            >
-              Status
-            </label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as NodeStatus)}
-              style={{
-                width: '100%',
-                padding: 'var(--spacing-md)',
-                fontSize: '14px',
-                borderRadius: '6px',
-                border: '1px solid var(--panel-border)',
-                backgroundColor: 'var(--panel-bg)',
-                color: 'var(--node-text)',
-              }}
-            >
-              <option value="draft">Draft</option>
-              <option value="valid">Valid</option>
-              <option value="invalid">Invalid</option>
-              <option value="final">Final</option>
-              <option value="experimental">Experimental</option>
-            </select>
-          </div>
+                {isExpanded && (
+                  <div style={{ paddingLeft: '12px' }}>
+                    {entries.map((item, i) => {
+                      const gi = startIndex + i;
+                      return renderItem(item, i, gi);
+                    })}
+                  </div>
+                )}
 
-          {/* Provider (Feature 011) */}
-          <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '14px',
-                fontWeight: 500,
-                color: 'var(--node-text)',
-                marginBottom: 'var(--spacing-sm)',
-              }}
-            >
-              LLM Provider
-            </label>
-            <ProviderSelector
-              selectedProviderId={providerId}
-              onProviderChange={setProviderId}
-            />
-          </div>
-        </div>
+                {(() => {
+                  if (isExpanded) globalIndex += entries.length;
+                  return null;
+                })()}
+              </div>
+            );
+          })}
+      </div>
 
-        {/* Footer Actions */}
+      {/* Footer hint */}
+      {parentId && (
         <div
           style={{
-            padding: 'var(--spacing-lg)',
+            padding: '6px 10px',
             borderTop: '1px solid var(--panel-border)',
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: 'var(--spacing-md)',
+            fontSize: '10px',
+            color: 'var(--node-text-secondary)',
+            textAlign: 'center',
           }}
         >
-          <button
-            onClick={onClose}
-            style={{
-              padding: '10px 20px',
-              fontSize: '14px',
-              fontWeight: 500,
-              borderRadius: '6px',
-              border: '1px solid var(--panel-border)',
-              backgroundColor: 'transparent',
-              color: 'var(--node-text)',
-              cursor: 'pointer',
-              transition: 'background-color var(--transition-fast)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.05)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            style={{
-              padding: '10px 20px',
-              fontSize: '14px',
-              fontWeight: 500,
-              borderRadius: '6px',
-              border: 'none',
-              backgroundColor: 'var(--primary-color)',
-              color: 'white',
-              cursor: 'pointer',
-              transition: 'background-color var(--transition-fast)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--primary-hover)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--primary-color)';
-            }}
-          >
-            Create Node (Ctrl+Enter)
-          </button>
+          Adding as child node
         </div>
-      </div>
+      )}
     </div>
   );
 }

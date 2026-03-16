@@ -98,9 +98,35 @@ export function transformNodesToConnections(
 ): ConnectionLine[] {
   const connections: ConnectionLine[] = [];
 
+  // Track which parent-child pairs already have named connections
+  const namedEdges = new Set<string>();
+
+  // First: create edges from explicit named connections (ComfyUI-style ports)
+  Object.values(nodes).forEach(node => {
+    if (node.connections) {
+      for (const [inputName, connSpec] of Object.entries(node.connections)) {
+        if (connSpec && connSpec.source_node_id) {
+          const edgeKey = `${connSpec.source_node_id}-${node.id}`;
+          namedEdges.add(edgeKey);
+          const conn = createConnectionLine(connSpec.source_node_id, node.id);
+          // Override ID to include port names for uniqueness
+          conn.id = `${connSpec.source_node_id}:${connSpec.output_name}-${node.id}:${inputName}`;
+          // Attach handle info (used in connectionLineToReactFlowEdge)
+          (conn as any).sourceHandle = connSpec.output_name;
+          (conn as any).targetHandle = inputName;
+          connections.push(conn);
+        }
+      }
+    }
+  });
+
+  // Second: create fallback edges for parent-child relationships without named connections
   Object.values(nodes).forEach(node => {
     node.children.forEach(childId => {
-      connections.push(createConnectionLine(node.id, childId));
+      const edgeKey = `${node.id}-${childId}`;
+      if (!namedEdges.has(edgeKey)) {
+        connections.push(createConnectionLine(node.id, childId));
+      }
     });
   });
 
@@ -168,6 +194,7 @@ export function visualNodeToReactFlowNode(
       nodeId: visualNode.nodeId,
       preview: visualNode.preview,
       type: visualNode.type,
+      class_type: (originalNode as any).class_type || null,
       author: visualNode.author,
       status: visualNode.status,
       importance: visualNode.importance,
@@ -185,6 +212,9 @@ export function visualNodeToReactFlowNode(
       node_width: originalNode.node_width,
       node_height: originalNode.node_height,
 
+      // Feature 011: Provider assignment
+      provider_id: (originalNode as any).provider_id || null,
+
       // isNewNode flag will be set separately when creating new nodes in Canvas.tsx
       isNewNode: false,
     },
@@ -195,11 +225,11 @@ export function visualNodeToReactFlowNode(
  * Convert ConnectionLine to React Flow Edge format
  */
 export function connectionLineToReactFlowEdge(connection: ConnectionLine): any {
-  return {
+  const edge: any = {
     id: connection.id,
     source: connection.source,
     target: connection.target,
-    type: 'smoothstep', // Bezier-like smooth edges
+    type: 'smoothstep',
     style: {
       stroke: connection.style.stroke,
       strokeWidth: connection.style.strokeWidth,
@@ -210,8 +240,18 @@ export function connectionLineToReactFlowEdge(connection: ConnectionLine): any {
       type: 'arrowclosed',
       color: connection.style.stroke,
     },
-    zIndex: -1, // Render behind nodes
+    zIndex: -1,
   };
+
+  // Named port handles (ComfyUI-style connections)
+  if ((connection as any).sourceHandle) {
+    edge.sourceHandle = (connection as any).sourceHandle;
+  }
+  if ((connection as any).targetHandle) {
+    edge.targetHandle = (connection as any).targetHandle;
+  }
+
+  return edge;
 }
 
 /**

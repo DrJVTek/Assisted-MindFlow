@@ -151,6 +151,8 @@ export function useStreamingContent(
       // Handle completion
       eventSource.addEventListener('complete', async (e: MessageEvent) => {
         const data = JSON.parse(e.data);
+        const tokensUsed = data.tokens_used || 0;
+
         // Update store
         completeOperation(operationId);
 
@@ -172,12 +174,12 @@ export function useStreamingContent(
             }
           } catch (persistError) {
             console.error('[useStreamingContent] Error persisting llm_response:', persistError);
-            // Don't fail the whole operation if persistence fails
           }
         }
 
         // Close connection
         eventSource.close();
+        eventSourceRef.current = null;
         setIsStreaming(false);
         currentOperationRef.current = null;
 
@@ -215,32 +217,18 @@ export function useStreamingContent(
       });
 
       // Handle EventSource errors (connection issues)
-      eventSource.onerror = (event) => {
-        console.error('EventSource error:', event);
+      eventSource.onerror = () => {
+        // EventSource auto-reconnects on error. On non-retryable errors
+        // (like 400 for already-terminal operations) it keeps retrying forever.
+        // Close immediately and don't retry — the 'error' event listener above
+        // already handles server-sent error events with proper messages.
+        eventSource.close();
+        eventSourceRef.current = null;
+        setIsStreaming(false);
+        currentOperationRef.current = null;
 
-        // Attempt reconnection if enabled
-        if (autoReconnect && reconnectAttempts < maxReconnectAttempts) {
-          setReconnectAttempts(prev => prev + 1);
-
-          // Exponential backoff
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-          setTimeout(() => {
-            startStreaming(operationId);
-          }, delay);
-
-        } else {
-          // Max retries exceeded
-          const errorMsg = 'Connection lost';
-          setError(errorMsg);
-          setIsStreaming(false);
-          failOperation(operationId, errorMsg);
-          eventSource.close();
-          currentOperationRef.current = null;
-
-          if (onError) {
-            onError(errorMsg);
-          }
-        }
+        // Only set error if we don't already have one (from the 'error' event)
+        setError(prev => prev || 'Connection lost');
       };
 
     } catch (err) {

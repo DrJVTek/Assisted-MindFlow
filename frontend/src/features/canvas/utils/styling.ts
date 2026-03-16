@@ -73,8 +73,8 @@ export function getNodeStyle(
   importance: number
 ): NodeStyle {
   return {
-    backgroundColor: NODE_TYPE_COLORS[type],
-    borderColor: NODE_STATUS_COLORS[status],
+    backgroundColor: NODE_TYPE_COLORS[type] || '#2A2A40',
+    borderColor: NODE_STATUS_COLORS[status] || '#9E9E9E',
     borderWidth: calculateBorderWidth(importance),
     opacity: calculateOpacity(importance),
     shadow: getNodeShadow(importance),

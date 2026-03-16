@@ -22,6 +22,8 @@ import ReactFlow, {
   Panel,
   useReactFlow,
   applyNodeChanges,
+  addEdge,
+  type Connection,
 } from 'reactflow';
 import { Settings, RefreshCw, Undo, Redo } from 'lucide-react';
 import 'reactflow/dist/style.css';
@@ -31,7 +33,8 @@ import { useLLMOperationsStore } from '../stores/llmOperationsStore';
 import { useGraphData } from '../features/canvas/hooks/useGraphData';
 import { useViewport } from '../features/canvas/hooks/useViewport';
 import { useLayout } from '../features/canvas/hooks/useLayout';
-import { transformGraphToReactFlow } from '../features/canvas/utils/transform';
+import { transformGraphToReactFlow, transformNode, visualNodeToReactFlowNode } from '../features/canvas/utils/transform';
+import { useConnectionValidator } from './ConnectionValidator';
 import { MIN_ZOOM, MAX_ZOOM, formatZoomPercentage } from '../features/canvas/utils/viewport';
 import { CustomNode } from './Node';
 import { GroupNode } from './GroupNode';
@@ -57,12 +60,13 @@ type ContextMenuType = 'canvas' | 'node' | 'group';
 // Lazy load DetailPanel for better performance
 const DetailPanel = lazy(() => import('./DetailPanel').then(module => ({ default: module.DetailPanel })));
 
-// Register custom node types
-const nodeTypes = {
+// Register custom node types — module-level for stable reference.
+// Also memoized inside CanvasInner as a safety net against HMR re-execution.
+const NODE_TYPES = {
   custom: CustomNode,
   group: GroupNode,
   comment: CommentNode,
-};
+} as const;
 
 // Node type (React Flow's internal type - not exported)
 type Node = {
@@ -92,6 +96,9 @@ function CanvasInner() {
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const reactFlowInstance = useReactFlow();
 
+  // Stable nodeTypes reference — prevents React Flow warning #002 even during HMR
+  const nodeTypes = useMemo(() => NODE_TYPES, []);
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
@@ -104,6 +111,7 @@ function CanvasInner() {
   // Node creator state
   const [nodeCreatorOpen, setNodeCreatorOpen] = useState(false);
   const [nodeCreatorParentId, setNodeCreatorParentId] = useState<string | undefined>(undefined);
+  const [nodeCreatorPosition, setNodeCreatorPosition] = useState<{ x: number; y: number } | undefined>(undefined);
 
   // Node editor state
   const [nodeEditorOpen, setNodeEditorOpen] = useState(false);
@@ -133,6 +141,9 @@ function CanvasInner() {
 
   // Multi-selection state
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
+
+  // Connection validation (Phase 6: type-safe connections)
+  const { isValidConnection } = useConnectionValidator();
 
   // Load canvases on mount
   useEffect(() => {
@@ -245,9 +256,10 @@ function CanvasInner() {
     [saveViewport]
   );
 
-  // Handle node click
+  // Handle node click (only open detail panel for regular nodes)
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
+      if (node.type !== 'custom') return;
       selectNode(node.id);
     },
     [selectNode]
@@ -281,6 +293,48 @@ function CanvasInner() {
     []
   );
 
+  // Handle new connection between nodes
+  const onConnect = useCallback(
+    async (connection: Connection) => {
+      if (!graphId || !connection.source || !connection.target) return;
+
+      // Add edge to local state
+      setLocalEdges(eds => addEdge(connection, eds));
+
+      // Build the update payload
+      const updatePayload: Record<string, unknown> = {
+        parent_id: connection.source,
+      };
+
+      // If named handles are used (ComfyUI-style ports), save the connection mapping
+      // sourceHandle = output port name, targetHandle = input port name
+      const sourceHandle = connection.sourceHandle;
+      const targetHandle = connection.targetHandle;
+      if (targetHandle && !targetHandle.startsWith('__default') && sourceHandle && !sourceHandle.startsWith('__default')) {
+        updatePayload.connection = {
+          input_name: targetHandle,
+          source_node_id: connection.source,
+          output_name: sourceHandle,
+        };
+      }
+
+      // Persist parent/child relationship + named connection to backend
+      try {
+        const response = await fetch(`/api/graphs/${graphId}/nodes/${connection.target}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatePayload),
+        });
+        if (!response.ok) {
+          console.error('[Canvas] Failed to save connection:', response.statusText);
+        }
+      } catch (err) {
+        console.error('[Canvas] Error saving connection:', err);
+      }
+    },
+    [graphId]
+  );
+
   // Handle node drag (no-op, position tracked by ReactFlow internally)
   const onNodeDrag = useCallback(
     (_event: React.MouseEvent, _node: Node) => {
@@ -293,6 +347,8 @@ function CanvasInner() {
   const onNodeDragStop = useCallback(
     async (_event: React.MouseEvent, node: Node) => {
       if (!graphId || !node.position) return;
+      // Only persist position for regular nodes (not groups or comments)
+      if (node.type !== 'custom') return;
       try {
         await api.updateNode(graphId, node.id, {
           position: { x: node.position.x, y: node.position.y },
@@ -309,10 +365,12 @@ function CanvasInner() {
     selectNode(null);
   }, [selectNode]);
 
-  // Handle double-click to fit view
-  const onDoubleClick = useCallback(() => {
-    fitView();
-  }, [fitView]);
+  // Handle double-click on canvas — open node picker at cursor (ComfyUI-style)
+  const onDoubleClick = useCallback((event: React.MouseEvent) => {
+    setNodeCreatorParentId(undefined);
+    setNodeCreatorPosition({ x: event.clientX, y: event.clientY });
+    setNodeCreatorOpen(true);
+  }, []);
 
   // Handle canvas right-click (context menu)
   const onPaneContextMenu = useCallback((event: React.MouseEvent) => {
@@ -345,9 +403,10 @@ function CanvasInner() {
   // Context menu action handlers
   const handleAddNode = useCallback(() => {
     setNodeCreatorParentId(undefined);
+    setNodeCreatorPosition(contextMenu ? { x: contextMenu.x, y: contextMenu.y } : undefined);
     setNodeCreatorOpen(true);
     closeContextMenu();
-  }, [closeContextMenu]);
+  }, [closeContextMenu, contextMenu]);
 
   const handleAddComment = useCallback(async () => {
     if (!contextMenu) {
@@ -526,68 +585,130 @@ function CanvasInner() {
   const handleAddChildNode = useCallback(() => {
     if (contextMenu?.nodeId) {
       setNodeCreatorParentId(contextMenu.nodeId);
+      setNodeCreatorPosition(contextMenu ? { x: contextMenu.x, y: contextMenu.y } : undefined);
       setNodeCreatorOpen(true);
     }
   }, [contextMenu]);
 
-  // Handle node creation
-  const handleSaveNode = useCallback(
-    async (nodeData: {
-      type: string;
-      content: string;
-      importance: number;
-      tags: string[];
-      status: string;
-      parentId?: string;
-    }) => {
+  // Create an empty child node (for ChatGPT-like conversation flow)
+  const handleCreateChildFromPanel = useCallback(async (parentId: string) => {
+    if (!graphId || !graphData) return;
+    const parentNode = graphData.nodes[parentId];
+    if (!parentNode) return;
+
+    try {
+      const createdNode = await api.createNode(graphId, {
+        type: parentNode.type || 'note',
+        content: '',
+        importance: 0.5,
+        tags: [],
+        status: 'draft',
+        parent_ids: [parentId],
+        provider_id: (parentNode as any).provider_id || undefined,
+      });
+
+      // Position below parent
+      const parentPos = parentNode.meta?.position || { x: 100, y: 100 };
+      const newPos = { x: parentPos.x, y: parentPos.y + 150 };
+      await api.updateNode(graphId, createdNode.id, { position: newPos } as any).catch(() => {});
+
+      const nodeForTransform = {
+        id: createdNode.id,
+        type: createdNode.type || parentNode.type,
+        author: 'human',
+        content: '',
+        children: [],
+        parents: [parentId],
+        meta: { position: newPos, status: 'draft', importance: 0.5, ...(createdNode.meta || {}) },
+        llm_response: null,
+        llm_operation_id: null,
+        provider_id: (parentNode as any).provider_id || null,
+      };
+
+      const visualNode = transformNode(nodeForTransform as any);
+      const newReactFlowNode = visualNodeToReactFlowNode(visualNode, nodeForTransform as any, graphId);
+      newReactFlowNode.position = newPos;
+
+      setLocalNodes((prev) => [...prev, newReactFlowNode]);
+      setLocalEdges((prev) => [
+        ...prev,
+        { id: `${parentId}-${createdNode.id}`, source: parentId, target: createdNode.id },
+      ]);
+
+      // Select the new node so the panel switches to it
+      selectNode(createdNode.id);
+    } catch (err) {
+      console.error('Failed to create child node:', err);
+    }
+  }, [graphId, graphData, selectNode]);
+
+  // Handle ComfyUI-style node creation: user picked a node type from the palette
+  const handleNodeTypeSelected = useCallback(
+    async (classType: string) => {
       if (!graphId) return;
       try {
-        console.log('Creating node via API:', nodeData);
+        // Calculate canvas position from the right-click / picker position
+        let canvasPos = { x: 100, y: 100 };
+        if (nodeCreatorPosition) {
+          canvasPos = reactFlowInstance.screenToFlowPosition({
+            x: nodeCreatorPosition.x,
+            y: nodeCreatorPosition.y,
+          });
+        }
 
         const createdNode = await api.createNode(graphId, {
-          type: nodeData.type,
-          content: nodeData.content,
-          importance: nodeData.importance,
-          tags: nodeData.tags,
-          status: nodeData.status,
-          parent_ids: nodeData.parentId ? [nodeData.parentId] : [],
+          type: classType,
+          content: '',
+          importance: 0.5,
+          tags: [],
+          status: 'draft',
+          parent_ids: nodeCreatorParentId ? [nodeCreatorParentId] : [],
         });
 
-        console.log('Node created successfully:', createdNode);
-
-        // Feature 009: Add node to local state with isNewNode flag for auto-launch
-        // Calculate position for new node (centered in viewport or near parent)
-        const newPosition = nodeData.parentId
-          ? { x: 100, y: 100 } // TODO: Calculate position near parent
-          : { x: 100, y: 100 }; // TODO: Center in viewport
-
-        const newReactFlowNode = {
+        // Build a Node-shaped object for the transform pipeline
+        const nodeForTransform = {
           id: createdNode.id,
-          type: 'custom', // Or based on nodeData.type
-          position: newPosition,
-          data: {
-            ...createdNode,
-            isNewNode: true, // Feature 009: Flag for auto-launch trigger
-            graphId, // Feature 009: Required for LLM operations
+          type: classType,
+          class_type: classType,
+          author: createdNode.author || 'human',
+          content: '',
+          children: createdNode.children || [],
+          parents: createdNode.parents || (nodeCreatorParentId ? [nodeCreatorParentId] : []),
+          meta: {
+            ...(createdNode.meta || {}),
+            // Position from cursor — must come AFTER spread to avoid being overwritten by null
+            position: canvasPos,
+            status: createdNode.meta?.status || 'draft',
+            importance: createdNode.meta?.importance ?? 0.5,
           },
+          llm_response: null,
+          llm_operation_id: null,
         };
 
-        // Add to local nodes
+        // Transform through the same pipeline as loaded nodes
+        const visualNode = transformNode(nodeForTransform as any);
+        const newReactFlowNode = visualNodeToReactFlowNode(visualNode, nodeForTransform as any, graphId);
+        newReactFlowNode.position = canvasPos;
+        newReactFlowNode.data.isNewNode = true;
+        newReactFlowNode.data.class_type = classType;
+
         setLocalNodes((prev) => [...prev, newReactFlowNode]);
 
-        // If there's a parent, add edge
-        if (nodeData.parentId) {
+        if (nodeCreatorParentId) {
           setLocalEdges((prev) => [
             ...prev,
             {
-              id: `${nodeData.parentId}-${createdNode.id}`,
-              source: nodeData.parentId,
+              id: `${nodeCreatorParentId}-${createdNode.id}`,
+              source: nodeCreatorParentId,
               target: createdNode.id,
             },
           ]);
         }
 
-        // Clear isNewNode flag after a short delay to prevent re-triggering on subsequent renders
+        // Select the new node to open DetailPanel
+        selectNode(createdNode.id);
+
+        // Clear isNewNode flag after delay
         setTimeout(() => {
           setLocalNodes((prev) =>
             prev.map((node) =>
@@ -602,7 +723,7 @@ function CanvasInner() {
         alert(`Error creating node: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     },
-    [graphId]
+    [graphId, nodeCreatorParentId, nodeCreatorPosition, reactFlowInstance, selectNode]
   );
 
   // Handle node update
@@ -985,7 +1106,9 @@ function CanvasInner() {
           zoomOnPinch={true}      // Pinch-to-zoom on touch devices
           zoomOnDoubleClick={false} // Disabled: node double-click opens editor
           nodesDraggable={true}     // Enable node dragging with left mouse button
-          nodesConnectable={false}  // Disable edge creation for now
+          nodesConnectable={true}   // Enable edge creation with type validation
+          onConnect={onConnect}
+          isValidConnection={isValidConnection}
           elementsSelectable={true} // Allow selecting elements
           selectNodesOnDrag={false} // Don't select on drag (allows node movement)
           // Selection Configuration
@@ -1138,8 +1261,12 @@ function CanvasInner() {
           }}>Loading...</div>}>
             <DetailPanel
               node={selectedNode}
+              graphId={graphId || ''}
+              allNodes={graphData?.nodes || {}}
               onClose={() => selectNode(null)}
               onUpdate={handleUpdateNode}
+              onCreateChild={handleCreateChildFromPanel}
+              onSelectNode={(nodeId) => selectNode(nodeId)}
             />
           </Suspense>
         )}
@@ -1173,8 +1300,8 @@ function CanvasInner() {
             onClose={() => setImportDialogOpen(false)}
             onImported={(groupId, nodeCount) => {
               console.log(`Imported ${nodeCount} nodes, group=${groupId}`);
-              // Refresh graph data to show imported nodes
-              window.location.reload();
+              // Invalidate graph cache and re-fetch to show imported nodes
+              useCanvasStore.getState().setGraphData(null);
             }}
           />
         )}
@@ -1199,11 +1326,12 @@ function CanvasInner() {
           />
         )}
 
-        {/* Node Creator Modal */}
+        {/* Node Picker (ComfyUI-style) */}
         {nodeCreatorOpen && (
           <NodeCreator
             onClose={() => setNodeCreatorOpen(false)}
-            onSave={handleSaveNode}
+            onSelect={handleNodeTypeSelected}
+            position={nodeCreatorPosition}
             parentId={nodeCreatorParentId}
           />
         )}

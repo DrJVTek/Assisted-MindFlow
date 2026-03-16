@@ -30,13 +30,28 @@ REM Wait for ports to be released
 timeout /t 3 /nobreak >nul
 
 echo [3/4] Starting backend server...
-start "MindFlow Backend" cmd /k "cd /d "%~dp0" && venv\Scripts\python.exe -m uvicorn mindflow.api.server:app --reload --port 8001"
-echo   - Backend starting on port 8001
+start "MindFlow Backend" cmd /k "cd /d "%~dp0" && venv\Scripts\python.exe -m uvicorn mindflow.api.server:app --reload --port 8000"
+echo   - Backend starting on port 8000
 echo.
 
-REM Wait for backend to initialize
-timeout /t 3 /nobreak >nul
+REM Wait for backend to be ready (poll until it responds)
+echo   - Waiting for backend to be ready...
+set RETRIES=0
+:wait_backend
+timeout /t 2 /nobreak >nul
+curl -s -o nul -w "%%{http_code}" http://localhost:8000/health >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
+    set /a RETRIES+=1
+    if %RETRIES% GEQ 15 (
+        echo   - WARNING: Backend not responding after 30s, starting frontend anyway
+        goto start_frontend
+    )
+    goto wait_backend
+)
+echo   - Backend is ready!
+echo.
 
+:start_frontend
 echo [4/4] Starting frontend server...
 start "MindFlow Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 echo   - Frontend starting on port 5173
@@ -44,7 +59,7 @@ echo.
 
 echo ================================================
 echo  Servers restarted successfully!
-echo  Backend:  http://localhost:8001
+echo  Backend:  http://localhost:8000
 echo  Frontend: http://localhost:5173
 echo ================================================
 echo.

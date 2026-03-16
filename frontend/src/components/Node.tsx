@@ -1,49 +1,31 @@
 /**
- * Custom Node Component
+ * Custom Node Component — Compact card on canvas
  *
- * Visual representation of reasoning nodes with:
- * - Type-based colors and icons
- * - Content preview (truncated to 100 chars)
- * - Status indicators
- * - Importance-based styling (border thickness, opacity)
- * - Author indicators (human/llm/tool)
+ * Nodes are COLLAPSED by default on the canvas. They show:
+ * - Colored title bar (plugin color)
+ * - 1-line content preview
+ * - Named ports (left=inputs, right=outputs)
+ * - Execution status indicator
+ *
+ * Full content editing happens in the DetailPanel (right side)
+ * when a node is selected. This gives a ChatGPT-like experience
+ * where the canvas is the conversation map and the panel is the workspace.
  */
 
-import React, { memo, useState } from 'react';
-import { Handle, Position, NodeResizer } from 'reactflow';
-import type { ResizeParams, ResizeDragEvent } from 'reactflow';
-import {
-  MessageCircleQuestion,
-  MessageCircleReply,
-  FileText,
-  Lightbulb,
-  CheckCircle,
-  FileType,
-  Target,
-  Users,
-  MessageSquare,
-  StopCircle,
-  Bot,
-  User,
-  Wrench,
-  ZoomIn,
-  ZoomOut,
-} from 'lucide-react';
+import React, { memo, useMemo } from 'react';
+import { Handle, Position } from 'reactflow';
+import { Bot, User, Wrench, Loader, Check, AlertCircle } from 'lucide-react';
 import type { NodeType, NodeAuthor, NodeStatus } from '../types/graph';
-import { useAutoLaunchLLM } from '../hooks/useAutoLaunchLLM';
-import { LLMNodeContent } from './LLMNodeContent';
-import { api } from '../services/api';
-import { useLLMOperationsStore } from '../stores/llmOperationsStore';
-import { useStreamingContent } from '../hooks/useStreamingContent';
+import { useNodeTypesStore } from '../stores/nodeTypesStore';
 import { useProviderStore } from '../stores/providerStore';
 
-/**
- * Node data interface (received from React Flow)
- */
+// ─── Types ───────────────────────────────────────────────────────────
+
 interface NodeData {
   nodeId: string;
   preview: string;
   type: NodeType;
+  class_type?: string;
   author: NodeAuthor;
   status: NodeStatus;
   importance: number;
@@ -51,564 +33,368 @@ interface NodeData {
   borderColor: string;
   borderWidth: number;
   opacity: number;
-  currentZoom?: number; // Optional: for zoom-based rendering
-
-  // Feature 009: Auto-launch fields
-  isNewNode?: boolean; // Flag for auto-launch trigger
-  content?: string; // Full content (question text)
-  graphId?: string; // Required for LLM operations
-  id?: string; // Node UUID (alternative to nodeId)
-
-  // Feature 009: Display fields
-  llm_response?: string | null; // LLM response (markdown)
-  llm_operation_id?: string | null; // Active operation ID
-  font_size?: number; // Font size (10-24px range)
-
-  // Inline LLM workflow fields
-  llm_status?: 'idle' | 'queued' | 'streaming' | 'complete' | 'error';
-  llm_error?: string | null;
-  prompt_height?: number;
-  response_height?: number;
-  note_top?: string | null;
-  note_bottom?: string | null;
-  collapsed?: boolean;
-  summary?: string | null;
-
-  // Feature 011: Provider assignment
+  currentZoom?: number;
+  content?: string;
+  id?: string;
   provider_id?: string | null;
 
-  // Feature 011: MCP tools attached to this node
-  mcp_tools?: string[];
+  // LLM status
+  llm_status?: 'idle' | 'queued' | 'streaming' | 'complete' | 'error';
+  llm_response?: string | null;
 }
 
-/**
- * Custom node props (React Flow's NodeProps type is not exported)
- */
 interface CustomNodeProps {
   data: NodeData;
   selected?: boolean;
 }
 
-/**
- * Get icon component for node type
- */
-function getTypeIcon(type: NodeType): React.ReactElement {
-  const iconProps = { size: 18, strokeWidth: 2 };
+// ─── Port helpers ───────────────────────────────────────────────────
 
-  switch (type) {
-    case 'question':
-      return <MessageCircleQuestion {...iconProps} />;
-    case 'answer':
-      return <MessageCircleReply {...iconProps} />;
-    case 'note':
-      return <FileText {...iconProps} />;
-    case 'hypothesis':
-      return <Lightbulb {...iconProps} />;
-    case 'evaluation':
-      return <CheckCircle {...iconProps} />;
-    case 'summary':
-      return <FileType {...iconProps} />;
-    case 'plan':
-      return <Target {...iconProps} />;
-    case 'group_meta':
-      return <Users {...iconProps} />;
-    case 'comment':
-      return <MessageSquare {...iconProps} />;
-    case 'stop':
-      return <StopCircle {...iconProps} />;
-    default:
-      return <FileText {...iconProps} />;
-  }
+interface PortInfo {
+  name: string;
+  type: string;
+  color: string;
 }
 
-/**
- * Get icon component for author
- */
+const WIDGET_TYPES = new Set(['COMBO', 'INT', 'FLOAT', 'BOOLEAN', 'SECRET']);
+
+const TYPE_COLORS: Record<string, string> = {
+  STRING: '#8BC34A',
+  CONTEXT: '#00BCD4',
+  INT: '#2196F3',
+  FLOAT: '#FF9800',
+  BOOLEAN: '#9C27B0',
+  COMBO: '#607D8B',
+  SECRET: '#F44336',
+  USAGE: '#795548',
+  TOOL_RESULT: '#E91E63',
+  EMBEDDING: '#3F51B5',
+  DOCUMENT: '#FF5722',
+};
+
+function extractTemplateVars(content: string): string[] {
+  const matches = content.match(/\{\{(\w+)\}\}/g);
+  if (!matches) return [];
+  return [...new Set(matches.map(m => m.slice(2, -2)))];
+}
+
 function getAuthorIcon(author: NodeAuthor): React.ReactElement {
-  const iconProps = { size: 14, strokeWidth: 2 };
-
+  const s = { size: 11, strokeWidth: 2 };
   switch (author) {
-    case 'human':
-      return <User {...iconProps} />;
-    case 'llm':
-      return <Bot {...iconProps} />;
-    case 'tool':
-      return <Wrench {...iconProps} />;
-    default:
-      return <User {...iconProps} />;
+    case 'human': return <User {...s} />;
+    case 'llm': return <Bot {...s} />;
+    case 'tool': return <Wrench {...s} />;
+    default: return <User {...s} />;
   }
 }
 
-/**
- * Get status badge color
- */
-function getStatusColor(status: NodeStatus): string {
-  switch (status) {
-    case 'draft':
-      return '#9E9E9E'; // Grey
-    case 'valid':
-      return '#4CAF50'; // Green
-    case 'invalid':
-      return '#F44336'; // Red
-    case 'final':
-      return '#2196F3'; // Blue
-    case 'experimental':
-      return '#FF9800'; // Orange
-    default:
-      return '#9E9E9E';
-  }
-}
+// ─── Compact Node Component ─────────────────────────────────────────
 
-/**
- * Custom Node Component (memoized for performance)
- */
 export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
   const {
-    preview,
-    type,
-    author,
-    status,
-    importance,
-    backgroundColor,
-    borderColor,
-    borderWidth,
-    opacity,
+    preview = '',
+    type = 'note' as NodeType,
+    class_type,
+    author = 'human' as NodeAuthor,
+    status = 'draft' as NodeStatus,
+    importance = 0.5,
+    opacity = 1.0,
     currentZoom = 1.0,
-    // Feature 009 fields
-    isNewNode = false,
     content = '',
-    graphId = '',
     id,
     nodeId,
-    llm_response,
-    llm_operation_id,
-    font_size: initialFontSize,
-    // Inline LLM workflow fields
-    llm_status,
-    llm_error,
-    prompt_height,
-    response_height,
-    note_top,
-    note_bottom,
-    // Feature 011: Provider
     provider_id,
-    // Feature 011: MCP tools
-    mcp_tools,
+    llm_status,
+    llm_response,
   } = data;
 
-  // Feature 011: Look up provider info for badge/color
   const provider = useProviderStore((s) =>
     provider_id ? s.providers.find((p) => p.id === provider_id) : undefined
   );
 
-  // Feature 009 T028-T029: Local font size state
-  const [fontSize, setFontSize] = useState(initialFontSize || 14);
-
-  // Feature 009: Auto-launch LLM on node creation
-  useAutoLaunchLLM({
-    nodeId: id || nodeId,
-    graphId,
-    isNewNode,
-    content,
+  const getTypeColor = useNodeTypesStore((s) => s.getTypeColor);
+  const nodeTypeDef = useNodeTypesStore((s) => {
+    const ct = class_type || type;
+    return s.nodeTypes[ct];
   });
 
-  const { createOperation } = useLLMOperationsStore();
-  const { startStreaming } = useStreamingContent(id || nodeId, { graphId: graphId || '' });
+  // ─── Derive ports ───────────────────────────────────────────────
+  const { inputPorts, outputPorts, headerColor, displayName } = useMemo(() => {
+    const inputs: PortInfo[] = [];
+    const outputs: PortInfo[] = [];
+    let color = '#546E7A';
+    let name = (class_type || type || 'node').replace(/_/g, ' ');
 
-  const handleContentChange = React.useCallback(async (newContent: string) => {
-    if (!graphId) return;
-    try {
-      await api.updateNode(graphId, id || nodeId, { content: newContent });
-    } catch (error) {
-      console.error('Failed to update content:', error);
-    }
-  }, [graphId, id, nodeId]);
+    if (nodeTypeDef) {
+      color = nodeTypeDef.ui?.color || color;
+      name = nodeTypeDef.display_name || name;
 
-  const handleGenerateClick = React.useCallback(async (overrideContent?: string) => {
-    if (!graphId) return;
-    const contentToUse = typeof overrideContent === 'string' ? overrideContent : content;
-
-    try {
-      // Get LLM config from localStorage (fallback)
-      const storedConfig = localStorage.getItem('mindflow_llm_config');
-      const llmConfig = storedConfig ? JSON.parse(storedConfig) : {
-        provider: 'ollama',
-        model: 'llama2'
+      const allInputs = {
+        ...(nodeTypeDef.inputs?.required || {}),
+        ...(nodeTypeDef.inputs?.optional || {}),
       };
-
-      // Feature 011: Use node's assigned provider if available
-      const operationRequest: {
-        nodeId: string;
-        graphId: string;
-        provider: string;
-        model: string;
-        prompt: string;
-        provider_id?: string;
-        mcp_tools?: string[];
-      } = {
-        nodeId: id || nodeId,
-        graphId,
-        provider: provider ? provider.type : llmConfig.provider,
-        model: provider?.selected_model || llmConfig.model,
-        prompt: contentToUse,
-      };
-
-      if (provider_id) {
-        operationRequest.provider_id = provider_id;
+      for (const [inputName, rawSpec] of Object.entries(allInputs)) {
+        const inputType = Array.isArray(rawSpec) ? rawSpec[0] as string : (rawSpec as any).type || 'STRING';
+        if (!WIDGET_TYPES.has(inputType)) {
+          inputs.push({
+            name: inputName,
+            type: inputType,
+            color: getTypeColor(inputType) || TYPE_COLORS[inputType] || '#90A4AE',
+          });
+        }
       }
 
-      if (mcp_tools && mcp_tools.length > 0) {
-        operationRequest.mcp_tools = mcp_tools;
-      }
-
-      // Create LLM operation
-      const operationId = await createOperation(operationRequest);
-
-      if (operationId) {
-        // Start streaming with the operation ID
-        startStreaming(operationId);
-      }
-    } catch (error) {
-      console.error('Failed to start generation:', error);
-    }
-  }, [graphId, id, nodeId, content, createOperation, startStreaming]);
-
-  const handleHeightsChange = React.useCallback(async (pHeight: number, rHeight: number) => {
-    if (!graphId) return;
-
-    // Clamp values to backend constraints (min only)
-    const clampedPromptHeight = Math.max(100, pHeight);
-    const clampedResponseHeight = Math.max(100, rHeight);
-
-    try {
-      await api.updateNode(graphId, id || nodeId, {
-        prompt_height: Math.round(clampedPromptHeight),
-        response_height: Math.round(clampedResponseHeight)
-      });
-    } catch (error) {
-      console.error('Failed to update heights:', error);
-    }
-  }, [graphId, id, nodeId]);
-
-  const handleNoteChange = React.useCallback(async (noteTop: string | null, noteBottom: string | null) => {
-    if (!graphId) return;
-    try {
-      await api.updateNode(graphId, id || nodeId, { note_top: noteTop, note_bottom: noteBottom });
-    } catch (error) {
-      console.error('Failed to update note:', error);
-    }
-  }, [graphId, id, nodeId]);
-
-  const handleResizeEnd = React.useCallback(async (event: ResizeDragEvent, params: ResizeParams) => {
-    if (!graphId) return;
-    const { width, height } = params;
-
-    // Auto-collapse logic
-    if (width < 220) { // Threshold for collapse
-      try {
-        await api.updateNode(graphId, id || nodeId, { collapsed: true, node_width: width, node_height: height });
-      } catch (error) {
-        console.error('Failed to collapse node:', error);
+      const returnTypes = nodeTypeDef.return_types || [];
+      const returnNames = nodeTypeDef.return_names || [];
+      for (let i = 0; i < returnTypes.length; i++) {
+        outputs.push({
+          name: returnNames[i] || `output_${i}`,
+          type: returnTypes[i],
+          color: getTypeColor(returnTypes[i]) || TYPE_COLORS[returnTypes[i]] || '#90A4AE',
+        });
       }
     } else {
-      try {
-        await api.updateNode(graphId, id || nodeId, { node_width: width, node_height: height });
-      } catch (error) {
-        console.error('Failed to persist dimensions:', error);
-      }
+      inputs.push({ name: 'input', type: 'STRING', color: TYPE_COLORS.STRING });
+      outputs.push({ name: 'output', type: 'STRING', color: TYPE_COLORS.STRING });
     }
-  }, [graphId, id, nodeId]);
 
-  // Feature 009 T028-T031: Font size handlers
-  const increaseFontSize = () => {
-    const newSize = Math.min(fontSize + 2, 24); // Max 24px
-    setFontSize(newSize);
-    // Persist to backend
-    if (graphId && (id || nodeId)) {
-      api.updateNode(graphId, id || nodeId, { font_size: newSize }).catch(err =>
-        console.error('Failed to persist font size:', err)
-      );
-    }
-  };
+    return { inputPorts: inputs, outputPorts: outputs, headerColor: color, displayName: name };
+  }, [nodeTypeDef, class_type, type, getTypeColor]);
 
-  const decreaseFontSize = () => {
-    const newSize = Math.max(fontSize - 2, 10); // Min 10px
-    setFontSize(newSize);
-    // Persist to backend
-    if (graphId && (id || nodeId)) {
-      api.updateNode(graphId, id || nodeId, { font_size: newSize }).catch(err =>
-        console.error('Failed to persist font size:', err)
-      );
-    }
-  };
+  // Template variable ports
+  const templateVarPorts = useMemo(() => {
+    if (!content) return [];
+    const vars = extractTemplateVars(content);
+    const existing = new Set(inputPorts.map(p => p.name));
+    return vars.filter(v => !existing.has(v)).map(v => ({
+      name: v, type: 'STRING', color: '#FFD54F',
+    }));
+  }, [content, inputPorts]);
 
-  const statusColor = getStatusColor(status);
-  const isZoomedOut = currentZoom < 0.5; // Simplify rendering below 50% zoom
+  const allInputPorts = useMemo(
+    () => [...inputPorts, ...templateVarPorts],
+    [inputPorts, templateVarPorts]
+  );
 
+  // ─── Status ─────────────────────────────────────────────────────
+  const isExecuting = llm_status === 'queued' || llm_status === 'streaming';
+  const isComplete = llm_status === 'complete';
+  const isError = llm_status === 'error';
+  const isZoomedOut = currentZoom < 0.3;
+
+  // 1-line preview of content
+  const contentPreview = useMemo(() => {
+    const text = content || preview || '';
+    if (text.length <= 60) return text;
+    return text.substring(0, 57) + '...';
+  }, [content, preview]);
+
+  // Response preview (1 line)
+  const responsePreview = useMemo(() => {
+    if (!llm_response) return null;
+    if (llm_response.length <= 50) return llm_response;
+    return llm_response.substring(0, 47) + '...';
+  }, [llm_response]);
+
+  // ─── Handle positions ───────────────────────────────────────────
+  const TITLE_H = 28;
+  const PORT_H = 16;
+  const PORT_START = TITLE_H + 4;
+  const getPortY = (i: number) => PORT_START + i * PORT_H + PORT_H / 2;
+
+  const maxPorts = Math.max(allInputPorts.length, outputPorts.length);
+  const portsHeight = maxPorts * PORT_H;
+  const nodeMinHeight = TITLE_H + (maxPorts > 0 ? portsHeight + 8 : 0) + 28; // 28 = preview line
+
+  // ─── Render ─────────────────────────────────────────────────────
   return (
     <div
-      className="mindflow-node"
+      className={`mindflow-node${isExecuting ? ' mindflow-node--executing' : ''}${isComplete ? ' mindflow-node--complete' : ''}${isError ? ' mindflow-node--error' : ''}`}
       style={{
-        backgroundColor,
-        borderColor: selected ? '#1976D2' : borderColor,
-        borderWidth: selected ? borderWidth + 2 : borderWidth,
+        backgroundColor: '#1E1E2E',
+        borderColor: selected ? '#4FC3F7' : isExecuting ? '#2196F3' : isError ? '#F44336' : isComplete ? '#4CAF50' : '#2A2A40',
+        borderWidth: selected ? 2 : 1,
         borderStyle: 'solid',
-        // Feature 011: Provider color accent on left border
-        ...(provider && !selected ? {
-          borderLeftColor: provider.color,
-          borderLeftWidth: Math.max(borderWidth, 3),
-        } : {}),
-        borderRadius: '8px',
-        padding: '12px',
-        width: '100%',
-        height: '100%',
-        minWidth: '200px',
-        minHeight: '100px',
+        borderRadius: '6px',
+        width: 220,
+        minHeight: nodeMinHeight,
         opacity,
         boxShadow: selected
-          ? '0 8px 16px rgba(0, 0, 0, 0.15)'
-          : importance > 7
-            ? '0 4px 8px rgba(0, 0, 0, 0.1)'
-            : '0 2px 4px rgba(0, 0, 0, 0.05)',
-        transition: 'all 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease',
-        cursor: 'move',
+          ? '0 0 0 1px #4FC3F7, 0 4px 12px rgba(79, 195, 247, 0.2)'
+          : isExecuting
+            ? '0 0 8px rgba(33, 150, 243, 0.4)'
+            : '0 2px 6px rgba(0, 0, 0, 0.2)',
+        transition: 'border-color 0.15s, box-shadow 0.15s',
+        cursor: 'pointer',
         fontFamily: 'system-ui, -apple-system, sans-serif',
         display: 'flex',
         flexDirection: 'column',
+        overflow: 'hidden',
+        position: 'relative',
       }}
     >
-      {/* Feature 009 T027: NodeResizer - only show when selected */}
-      {selected && (
-        <NodeResizer
-          minWidth={200}
-          minHeight={100}
-          isVisible={selected}
-          lineStyle={{ border: '1px solid #1976D2' }}
-          handleStyle={{ width: 8, height: 8, borderRadius: '50%' }}
-          onResizeEnd={handleResizeEnd}
+      {/* ── Named Input Handles (left) ─────────────────────────── */}
+      {allInputPorts.map((port, i) => (
+        <Handle
+          key={`in-${port.name}`}
+          type="target"
+          position={Position.Left}
+          id={port.name}
+          style={{
+            top: getPortY(i),
+            background: port.color,
+            width: 8,
+            height: 8,
+            border: '2px solid #1E1E2E',
+            left: -4,
+          }}
+        />
+      ))}
+
+      {/* ── Named Output Handles (right) ───────────────────────── */}
+      {outputPorts.map((port, i) => (
+        <Handle
+          key={`out-${port.name}`}
+          type="source"
+          position={Position.Right}
+          id={port.name}
+          style={{
+            top: getPortY(i),
+            background: port.color,
+            width: 8,
+            height: 8,
+            border: '2px solid #1E1E2E',
+            right: -4,
+          }}
+        />
+      ))}
+
+      {/* Fallback handles for nodes without plugin metadata (legacy/migration) */}
+      {allInputPorts.length === 0 && (
+        <Handle
+          type="target"
+          position={Position.Top}
+          id="__default_in"
+          style={{ background: '#546E7A', width: 6, height: 6, border: '1px solid #1E1E2E', opacity: 0.5 }}
+        />
+      )}
+      {outputPorts.length === 0 && (
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          id="__default_out"
+          style={{ background: '#546E7A', width: 6, height: 6, border: '1px solid #1E1E2E', opacity: 0.5 }}
         />
       )}
 
-      {/* Connection handles */}
-      <Handle
-        type="target"
-        position={Position.Top}
+      {/* ── Title Bar ──────────────────────────────────────────── */}
+      <div
         style={{
-          background: '#90A4AE',
-          width: 8,
-          height: 8,
-          border: '2px solid white',
-        }}
-      />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        style={{
-          background: '#90A4AE',
-          width: 8,
-          height: 8,
-          border: '2px solid white',
-        }}
-      />
-
-      {/* Simplified rendering at low zoom (<50%) */}
-      {isZoomedOut ? (
-        <div style={{
+          background: headerColor,
+          padding: '4px 10px',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          height: '100%',
+          justifyContent: 'space-between',
           gap: '6px',
-        }}>
-          <div style={{ color: '#546E7A', display: 'flex' }}>
-            {getTypeIcon(type)}
-          </div>
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: 600,
-              color: '#546E7A',
-              textTransform: 'capitalize',
-            }}
-          >
-            {type.replace('_', ' ')}
+          minHeight: TITLE_H,
+          borderRadius: '5px 5px 0 0',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
+          {/* Execution status icon */}
+          {isExecuting && <Loader size={11} style={{ color: 'rgba(255,255,255,0.9)', animation: 'spin 1s linear infinite' }} />}
+          {isComplete && <Check size={11} style={{ color: 'rgba(255,255,255,0.9)' }} />}
+          {isError && <AlertCircle size={11} style={{ color: 'rgba(255,255,255,0.9)' }} />}
+
+          <span style={{
+            fontSize: '11px',
+            fontWeight: 600,
+            color: 'white',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+          }}>
+            {displayName}
           </span>
         </div>
-      ) : (
-        <>
-          {/* Header: Type icon + Status badge + Author + Font controls */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '8px',
-              flexShrink: 0,
-            }}
-          >
-            {/* Type icon + label */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <div style={{ color: '#546E7A', display: 'flex' }}>
-                {getTypeIcon(type)}
-              </div>
-              <span
-                style={{
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  color: '#546E7A',
-                  textTransform: 'capitalize',
-                }}
-              >
-                {type.replace('_', ' ')}
-              </span>
-              {/* Feature 011: Provider badge */}
-              {provider && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    marginLeft: '4px',
-                    padding: '1px 6px',
-                    borderRadius: '4px',
-                    backgroundColor: provider.color + '20',
-                    border: `1px solid ${provider.color}40`,
-                  }}
-                  title={`Provider: ${provider.name}`}
-                >
-                  <div
-                    style={{
-                      width: '6px',
-                      height: '6px',
-                      borderRadius: '50%',
-                      backgroundColor: provider.color,
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontSize: '10px',
-                      fontWeight: 500,
-                      color: provider.color,
-                      maxWidth: '60px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {provider.name}
-                  </span>
-                </div>
-              )}
-            </div>
 
-            {/* Status badge + Author icon + Font controls */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              {/* Feature 009 T028: Font size controls - only show when LLM content present */}
-              {(llm_response || llm_operation_id) && selected && (
-                <>
-                  <button
-                    onClick={decreaseFontSize}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: '2px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      color: '#546E7A',
-                    }}
-                    title="Decrease font size"
-                  >
-                    <ZoomOut size={14} />
-                  </button>
-                  <span style={{ fontSize: '10px', color: '#78909C', minWidth: '28px', textAlign: 'center' }}>
-                    {fontSize}px
-                  </span>
-                  <button
-                    onClick={increaseFontSize}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: '2px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      color: '#546E7A',
-                    }}
-                    title="Increase font size"
-                  >
-                    <ZoomIn size={14} />
-                  </button>
-                </>
-              )}
-
-              {/* Status badge */}
-              <div
-                style={{
-                  backgroundColor: statusColor,
-                  color: 'white',
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  fontSize: '10px',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                }}
-              >
-                {status}
-              </div>
-
-              {/* Author icon */}
-              <div
-                style={{ color: '#78909C', display: 'flex' }}
-                title={`Author: ${author}`}
-              >
-                {getAuthorIcon(author)}
-              </div>
-            </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+          {provider && (
+            <span style={{
+              fontSize: '8px', fontWeight: 500, color: 'rgba(255,255,255,0.6)',
+              backgroundColor: 'rgba(0,0,0,0.2)', padding: '1px 4px', borderRadius: '2px',
+            }}>
+              {provider.name}
+            </span>
+          )}
+          <div style={{ color: 'rgba(255,255,255,0.6)', display: 'flex' }}>
+            {getAuthorIcon(author)}
           </div>
+        </div>
+      </div>
 
-          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <LLMNodeContent
-              nodeId={id || nodeId}
-              graphId={graphId || ''}
-              content={content}
-              llmResponse={llm_response || null}
-              llmOperationId={llm_operation_id || null}
-              isNewNode={isNewNode}
-              llmStatus={llm_status || 'idle'}
-              llmError={llm_error || null}
-              promptHeight={prompt_height || 300}
-              responseHeight={response_height || 200}
-              noteTop={note_top || null}
-              noteBottom={note_bottom || null}
-              fontSize={fontSize}
-              onContentChange={handleContentChange}
-              onGenerateClick={handleGenerateClick}
-              onStopClick={() => { }}
-              onRefreshClick={() => { }}
-              onHeightsChange={handleHeightsChange}
-              onNoteChange={handleNoteChange}
-            />
-          </div>
-
-          {/* Importance indicator (bottom border) */}
-          {importance > 7 && (
-            <div
-              style={{
-                marginTop: '8px',
-                paddingTop: '8px',
-                borderTop: `2px solid ${borderColor}`,
-                fontSize: '10px',
-                color: '#78909C',
-                fontWeight: 600,
-                textAlign: 'right',
-                flexShrink: 0,
-              }}
-            >
-              High Priority
+      {/* ── Port labels + Content preview ──────────────────────── */}
+      {!isZoomedOut && (
+        <div style={{ padding: '4px 8px 6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          {/* Port labels row */}
+          {(allInputPorts.length > 0 || outputPorts.length > 0) && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', minHeight: portsHeight }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                {allInputPorts.map(p => (
+                  <span key={p.name} style={{
+                    fontSize: '8px', color: '#6B7280', lineHeight: `${PORT_H}px`,
+                    display: 'flex', alignItems: 'center', gap: '3px',
+                  }}>
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', backgroundColor: p.color, display: 'inline-block' }} />
+                    {p.name}
+                  </span>
+                ))}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', alignItems: 'flex-end' }}>
+                {outputPorts.map(p => (
+                  <span key={p.name} style={{
+                    fontSize: '8px', color: '#6B7280', lineHeight: `${PORT_H}px`,
+                    display: 'flex', alignItems: 'center', gap: '3px', flexDirection: 'row-reverse',
+                  }}>
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', backgroundColor: p.color, display: 'inline-block' }} />
+                    {p.name}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
-        </>
+
+          {/* Content preview */}
+          {contentPreview && (
+            <div style={{
+              fontSize: '10px',
+              color: '#9CA3AF',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              borderTop: '1px solid #2A2A40',
+              paddingTop: '3px',
+              marginTop: '2px',
+            }}>
+              {contentPreview}
+            </div>
+          )}
+
+          {/* Response preview */}
+          {responsePreview && (
+            <div style={{
+              fontSize: '9px',
+              color: '#6B7280',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontStyle: 'italic',
+            }}>
+              → {responsePreview}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

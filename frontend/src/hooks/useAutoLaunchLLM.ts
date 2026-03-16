@@ -48,10 +48,10 @@ export interface UseAutoLaunchLLMOptions {
   content: string;
 
   /**
-   * Optional LLM provider override
+   * Optional LLM provider type override
    * If not provided, uses default from settings
    */
-  provider?: 'openai' | 'anthropic' | 'ollama';
+  provider?: string;
 
   /**
    * Optional model override
@@ -63,6 +63,17 @@ export interface UseAutoLaunchLLMOptions {
    * Optional system prompt override
    */
   systemPrompt?: string;
+
+  /**
+   * Feature 011: Provider registry ID for multi-provider support
+   */
+  providerId?: string | null;
+
+  /**
+   * Plugin class_type (e.g., "chatgpt_web_chat") — used to auto-resolve
+   * the correct provider from plugin metadata when no explicit providerId.
+   */
+  classType?: string;
 }
 
 /**
@@ -81,7 +92,9 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
     content,
     provider: overrideProvider,
     model: overrideModel,
-    systemPrompt
+    systemPrompt,
+    providerId,
+    classType,
   } = options;
 
   // Prevent duplicate launches on re-renders
@@ -128,10 +141,55 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
     // Async auto-launch function
     const autoLaunch = async () => {
       try {
-        // Resolve provider/model from settings if not overridden
+        // Default models per provider type
+        const DEFAULT_MODELS: Record<string, string> = {
+          openai: 'gpt-4o',
+          anthropic: 'claude-sonnet-4-6',
+          gemini: 'gemini-2.0-flash',
+          local: 'llama3.2',
+          chatgpt_web: 'gpt-5.1-codex',
+        };
+
+        // Resolve provider/model: providerId > classType plugin > override > localStorage
         let finalProvider = overrideProvider;
         let finalModel = overrideModel;
+        let finalProviderId = providerId || undefined;
 
+        const { useProviderStore } = await import('../stores/providerStore');
+        const { useNodeTypesStore } = await import('../stores/nodeTypesStore');
+
+        // 1. If we have a providerId, fetch provider info from store
+        if (finalProviderId) {
+          const providerInfo = useProviderStore.getState().providers.find(
+            (p) => p.id === finalProviderId
+          );
+          if (providerInfo) {
+            if (!finalProvider) finalProvider = providerInfo.type;
+            if (!finalModel) finalModel = providerInfo.selected_model || DEFAULT_MODELS[providerInfo.type];
+          }
+        }
+
+        // 2. If still no provider, resolve from plugin class_type category
+        if (!finalProvider && classType) {
+          const pluginProviderType = useNodeTypesStore.getState().getProviderType(classType);
+          if (pluginProviderType) {
+            const matchingProvider = useProviderStore.getState().providers.find(
+              (p) => p.type === pluginProviderType
+            );
+            if (matchingProvider) {
+              finalProvider = matchingProvider.type;
+              finalProviderId = matchingProvider.id;
+              if (!finalModel) finalModel = matchingProvider.selected_model || DEFAULT_MODELS[matchingProvider.type];
+            } else {
+              // Provider type exists in plugins but not configured
+              console.error(`[useAutoLaunchLLM] No provider configured for type '${pluginProviderType}'. Add one in Settings.`);
+              hasLaunchedRef.current = false;
+              return;
+            }
+          }
+        }
+
+        // 3. Last resort: check localStorage config
         if (!finalProvider || !finalModel) {
           const storedConfig = localStorage.getItem('mindflow_llm_config');
           if (storedConfig) {
@@ -141,9 +199,15 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
           }
         }
 
-        // Fallback defaults
-        finalProvider = finalProvider || 'ollama';
-        finalModel = finalModel || 'llama2';
+        // No silent fallback — if we still don't have a provider, abort
+        if (!finalProvider) {
+          console.error('[useAutoLaunchLLM] No provider resolved. Configure a provider in Settings.');
+          hasLaunchedRef.current = false;
+          return;
+        }
+        if (!finalModel) {
+          finalModel = DEFAULT_MODELS[finalProvider];
+        }
 
         // Create LLM operation
         const operationId = await createOperation({
@@ -153,6 +217,7 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
           model: finalModel,
           prompt: content,
           systemPrompt,
+          provider_id: finalProviderId,
           metadata: {
             autoLaunched: true,
             timestamp: new Date().toISOString()
@@ -188,5 +253,5 @@ export function useAutoLaunchLLM(options: UseAutoLaunchLLMOptions): void {
     autoLaunch();
 
     // NOTE: No cleanup needed - operation lifecycle managed by store
-  }, [nodeId, graphId, isNewNode, content, overrideProvider, overrideModel, systemPrompt, createOperation, startStreaming]);
+  }, [nodeId, graphId, isNewNode, content, overrideProvider, overrideModel, systemPrompt, classType, createOperation, startStreaming]);
 }

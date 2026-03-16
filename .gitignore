@@ -87,6 +87,10 @@ data/providers.json
 data/mcp_connections.json
 config/config.json
 
+# ── Community plugins (user-installed, not tracked) ──────
+plugins/community/
+!plugins/community/.gitkeep
+
 # ── Test artifacts ────────────────────────────────────────────
 test_data/
 *.test.db

@@ -303,42 +303,47 @@ class ProviderRegistry:
         creds: Optional[ProviderCredentials],
         provider_id: str,
     ) -> Optional[LLMProvider]:
-        """Create a concrete LLMProvider from config and credentials."""
-        try:
-            if config.type == ProviderType.ANTHROPIC:
-                from mindflow.providers.anthropic import AnthropicProvider
-                return AnthropicProvider(api_key=creds.api_key if creds else None)
+        """Create a concrete LLMProvider from config and credentials.
 
-            if config.type == ProviderType.OPENAI:
-                if config.auth_method == AuthMethod.OAUTH:
-                    # OpenAI with OAuth — use ChatGPT provider
-                    from mindflow.providers.openai_chatgpt import OpenAIChatGPTProvider
-                    oauth_service = self.get_oauth_service(provider_id)
-                    return OpenAIChatGPTProvider(oauth_service=oauth_service)
-                from mindflow.providers.openai import OpenAIProvider
-                return OpenAIProvider(
+        Uses a factory lookup by ProviderType. OAuth providers get an
+        OAuthService instead of an API key.
+        """
+        from mindflow.providers.anthropic import AnthropicProvider
+        from mindflow.providers.gemini import GeminiProvider
+        from mindflow.providers.ollama import OllamaProvider
+        from mindflow.providers.openai import OpenAIProvider
+        from mindflow.providers.openai_chatgpt import OpenAIChatGPTProvider
+
+        try:
+            # OAuth-authenticated providers
+            if config.auth_method == AuthMethod.OAUTH or config.type == ProviderType.CHATGPT_WEB:
+                oauth_service = self.get_oauth_service(provider_id)
+                return OpenAIChatGPTProvider(oauth_service=oauth_service)
+
+            # API-key / endpoint providers
+            factory = {
+                ProviderType.OPENAI: lambda: OpenAIProvider(
                     api_key=creds.api_key if creds else None,
                     base_url=config.endpoint_url,
-                )
+                ),
+                ProviderType.ANTHROPIC: lambda: AnthropicProvider(
+                    api_key=creds.api_key if creds else None,
+                ),
+                ProviderType.GEMINI: lambda: GeminiProvider(
+                    api_key=creds.api_key if creds else None,
+                ),
+                ProviderType.LOCAL: lambda: OllamaProvider(
+                    base_url=config.endpoint_url,
+                ),
+            }
 
-            if config.type == ProviderType.GEMINI:
-                from mindflow.providers.gemini import GeminiProvider
-                return GeminiProvider(api_key=creds.api_key if creds else None)
+            builder = factory.get(config.type)
+            if builder is None:
+                logger.error("Unknown provider type: %s", config.type)
+                return None
 
-            if config.type == ProviderType.LOCAL:
-                from mindflow.providers.ollama import OllamaProvider
-                return OllamaProvider(endpoint_url=config.endpoint_url)
-
-            if config.type == ProviderType.CHATGPT_WEB:
-                from mindflow.providers.openai_chatgpt import OpenAIChatGPTProvider
-                if config.auth_method == AuthMethod.OAUTH:
-                    oauth_service = self.get_oauth_service(provider_id)
-                    return OpenAIChatGPTProvider(oauth_service=oauth_service)
-                return OpenAIChatGPTProvider(
-                    access_token=creds.oauth_token if creds else None,
-                )
+            return builder()
 
         except Exception as exc:
             logger.error("Failed to create provider instance for %s: %s", config.id, exc)
-
-        return None
+            raise

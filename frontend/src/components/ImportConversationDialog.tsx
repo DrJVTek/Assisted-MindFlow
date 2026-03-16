@@ -4,19 +4,26 @@
  * Lets users browse their ChatGPT conversations and import one
  * as a group of interconnected nodes in the current canvas.
  *
- * Flow: Check token → (setup if needed) → list conversations → preview → import
+ * Flow: Check token → (setup if needed) → browse (projects + conversations) → preview → import
  *
  * Token setup uses a two-step approach:
- * 1. User copies a one-liner to chatgpt.com console → copies token to clipboard
+ * 1. User copies a one-liner to chatgpt.com console → token shown in prompt()
  * 2. User pastes token into MindFlow input field → MindFlow sends it to backend
  * This avoids CSP issues (chatgpt.com blocks fetch to localhost).
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Download, MessageSquare, ChevronRight, Loader2, GitBranch, ArrowLeft, User, Bot, Copy, AlertCircle, ClipboardPaste, Check, Archive } from 'lucide-react';
+import { X, Download, MessageSquare, ChevronRight, Loader2, GitBranch, ArrowLeft, User, Bot, Copy, AlertCircle, ClipboardPaste, Check, Archive, FolderOpen } from 'lucide-react';
 import { api } from '../services/api';
 
-type ConversationFilter = 'active' | 'archived';
+type BrowseTab = 'projects' | 'conversations' | 'archived';
+
+interface ProjectSummary {
+  id: string;
+  name: string;
+  created_at: string | null;
+  conversation_count: number | null;
+}
 
 interface ConversationSummary {
   id: string;
@@ -37,22 +44,23 @@ interface ImportConversationDialogProps {
   onImported: (groupId: string, nodeCount: number) => void;
 }
 
-type View = 'checking' | 'setup' | 'list' | 'preview';
+type View = 'checking' | 'setup' | 'browse' | 'project-conversations' | 'preview';
 
 // Console command: extracts ChatGPT session token → shows it in a prompt() dialog.
-// prompt() is the most reliable cross-browser way: the text is pre-selected, user just hits Ctrl+C.
-// copy() and navigator.clipboard.writeText() are blocked by ChatGPT's page.
-// Must be run on chatgpt.com. CSP prevents direct fetch to localhost.
 const CONSOLE_COMMAND = `if(!location.hostname.includes('chatgpt.com')){console.error('%c ERREUR: Execute cette commande sur chatgpt.com ! ','background:#f44336;color:white;padding:4px 12px;border-radius:4px;font-size:14px')}else{fetch('/api/auth/session').then(r=>r.json()).then(d=>{if(!d.accessToken){console.error('%c ERREUR: Pas de token. Es-tu connecte a ChatGPT ? ','background:#f44336;color:white;padding:4px 12px;border-radius:4px;font-size:14px');return}prompt('Token ChatGPT — Ctrl+C pour copier, puis colle dans MindFlow :',d.accessToken)}).catch(()=>console.error('%c ERREUR: Impossible de recuperer la session ','background:#f44336;color:white;padding:4px 12px;border-radius:4px;font-size:14px'))}`;
 
 export function ImportConversationDialog({ graphId, onClose, onImported }: ImportConversationDialogProps) {
   const [view, setView] = useState<View>('checking');
-  const [filter, setFilter] = useState<ConversationFilter>('active');
+  const [browseTab, setBrowseTab] = useState<BrowseTab>('projects');
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Project drill-down state
+  const [selectedProject, setSelectedProject] = useState<ProjectSummary | null>(null);
 
   // Setup state
   const [commandCopied, setCommandCopied] = useState(false);
@@ -78,8 +86,8 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
       try {
         const status = await api.getChatGPTTokenStatus();
         if (status.status === 'connected') {
-          setView('list');
-          loadConversations(0, 'active');
+          setView('browse');
+          loadProjects();
         } else {
           setView('setup');
         }
@@ -89,20 +97,40 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
     })();
   }, []);
 
-  // Load conversations with optional archive filter
-  const loadConversations = useCallback(async (newOffset: number, f?: ConversationFilter) => {
-    const currentFilter = f ?? filter;
+  // Load projects
+  const loadProjects = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const isArchived = currentFilter === 'archived' ? true : undefined;
+      const data = await api.listChatGPTProjects();
+      setProjects(data);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || '';
+      if (detail.includes('expired') || detail.includes('invalid') || detail.includes('rejected')) {
+        setView('setup');
+        setError('Token expire. Reconnecte-toi.');
+      } else {
+        setError(detail || 'Impossible de charger les projets');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Load conversations (all or archived)
+  const loadConversations = useCallback(async (newOffset: number, tab?: BrowseTab) => {
+    const currentTab = tab ?? browseTab;
+    setLoading(true);
+    setError(null);
+    try {
+      const isArchived = currentTab === 'archived' ? true : undefined;
       const data = await api.listChatGPTConversations(newOffset, limit, isArchived);
       setConversations(data.conversations);
       setTotal(data.total);
       setOffset(newOffset);
     } catch (err: any) {
       const detail = err?.response?.data?.detail || err?.message || '';
-      if (detail.includes('expired') || detail.includes('invalid') || detail.includes('denied')) {
+      if (detail.includes('expired') || detail.includes('invalid') || detail.includes('rejected')) {
         setView('setup');
         setError('Token expire. Reconnecte-toi.');
       } else {
@@ -111,12 +139,34 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [browseTab]);
 
-  const handleFilterChange = (f: ConversationFilter) => {
-    setFilter(f);
+  // Load conversations for a specific project
+  const loadProjectConversations = useCallback(async (project: ProjectSummary, newOffset: number) => {
+    setSelectedProject(project);
+    setView('project-conversations');
+    setLoading(true);
+    setError(null);
+    setOffset(newOffset);
+    try {
+      const data = await api.listProjectConversations(project.id, newOffset, limit);
+      setConversations(data.conversations);
+      setTotal(data.total);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || err?.message || 'Impossible de charger les conversations');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleTabChange = (tab: BrowseTab) => {
+    setBrowseTab(tab);
     setOffset(0);
-    loadConversations(0, f);
+    if (tab === 'projects') {
+      loadProjects();
+    } else {
+      loadConversations(0, tab);
+    }
   };
 
   // Copy the console command to clipboard
@@ -151,10 +201,9 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
       const result = await api.setChatGPTAccessToken(token);
       if (result.status === 'connected') {
         setTokenStatus('connected');
-        // Short delay for the user to see success, then show conversations
         setTimeout(() => {
-          setView('list');
-          loadConversations(0, 'active');
+          setView('browse');
+          loadProjects();
         }, 800);
       } else {
         setTokenStatus('invalid');
@@ -181,10 +230,24 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
       setPreviewMessages(preview.messages);
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'Impossible de charger la conversation');
-      setView('list');
+      goBackFromPreview();
     } finally {
       setPreviewLoading(false);
     }
+  };
+
+  const goBackFromPreview = () => {
+    if (selectedProject) {
+      setView('project-conversations');
+    } else {
+      setView('browse');
+    }
+  };
+
+  const goBackFromProject = () => {
+    setSelectedProject(null);
+    setView('browse');
+    setBrowseTab('projects');
   };
 
   // Import
@@ -221,8 +284,11 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
   const headerTitle = () => {
     if (view === 'setup') return 'Connexion a ChatGPT';
     if (view === 'preview') return selectedTitle;
+    if (view === 'project-conversations' && selectedProject) return selectedProject.name;
     return 'Import ChatGPT';
   };
+
+  const showBackButton = view === 'preview' || view === 'project-conversations';
 
   return (
     <>
@@ -255,12 +321,15 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
           display: 'flex', alignItems: 'center', gap: '12px',
           background: 'var(--panel-bg-secondary)',
         }}>
-          {view === 'preview' && (
-            <button onClick={() => setView('list')} style={backBtnStyle}>
+          {showBackButton && (
+            <button onClick={view === 'preview' ? goBackFromPreview : goBackFromProject} style={backBtnStyle}>
               <ArrowLeft size={18} />
             </button>
           )}
-          <MessageSquare size={18} style={{ color: '#10a37f' }} />
+          {view === 'project-conversations'
+            ? <FolderOpen size={18} style={{ color: '#10a37f' }} />
+            : <MessageSquare size={18} style={{ color: '#10a37f' }} />
+          }
           <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: 'var(--node-text)', flex: 1 }}>
             {headerTitle()}
           </h3>
@@ -296,7 +365,6 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
           {/* ── Setup ── */}
           {view === 'setup' && (
             <div style={{ padding: '24px 20px' }}>
-              {/* Header */}
               <div style={{ textAlign: 'center', marginBottom: '20px' }}>
                 <MessageSquare size={32} style={{ color: '#10a37f', marginBottom: '12px' }} />
                 <h4 style={{
@@ -326,18 +394,13 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
                   color: 'var(--node-text)', marginBottom: '8px',
                   display: 'flex', alignItems: 'center', gap: '6px',
                 }}>
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: '20px', height: '20px', borderRadius: '50%',
-                    backgroundColor: '#10a37f', color: 'white', fontSize: '11px', fontWeight: 700,
-                  }}>1</span>
+                  <span style={stepBadgeStyle}>1</span>
                   Recuperer le token sur chatgpt.com
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--node-text-secondary)', lineHeight: 1.6, marginBottom: '10px' }}>
                   Va sur <strong style={{ color: '#10a37f' }}>chatgpt.com</strong>, ouvre la console
                   (<kbd style={kbdStyle}>F12</kbd> → <strong>Console</strong>),
                   colle la commande ci-dessous et appuie sur <kbd style={kbdStyle}>Entree</kbd>.
-                  Le token sera copie dans ton presse-papier.
                 </div>
                 <button
                   onClick={handleCopyCommand}
@@ -369,11 +432,7 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
                   color: 'var(--node-text)', marginBottom: '8px',
                   display: 'flex', alignItems: 'center', gap: '6px',
                 }}>
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: '20px', height: '20px', borderRadius: '50%',
-                    backgroundColor: '#10a37f', color: 'white', fontSize: '11px', fontWeight: 700,
-                  }}>2</span>
+                  <span style={stepBadgeStyle}>2</span>
                   Coller le token ici
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -438,7 +497,6 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
                 </button>
               </div>
 
-              {/* Info note */}
               <p style={{
                 fontSize: '11px', color: 'var(--node-text-muted)',
                 textAlign: 'center', fontStyle: 'italic', margin: 0,
@@ -448,25 +506,29 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
             </div>
           )}
 
-          {/* ── List ── */}
-          {view === 'list' && (
+          {/* ── Browse (Projects / Conversations / Archived) ── */}
+          {view === 'browse' && (
             <>
-              {/* Filter tabs */}
+              {/* Tabs */}
               <div style={{
                 display: 'flex', gap: '0', borderBottom: '1px solid var(--panel-border)',
                 background: 'var(--panel-bg-secondary)',
               }}>
-                {([['active', 'Conversations', <MessageSquare size={13} key="a" />], ['archived', 'Archives', <Archive size={13} key="b" />]] as const).map(([key, label, icon]) => (
+                {([
+                  ['projects', 'Projets', <FolderOpen size={13} key="p" />],
+                  ['conversations', 'Conversations', <MessageSquare size={13} key="c" />],
+                  ['archived', 'Archives', <Archive size={13} key="a" />],
+                ] as const).map(([key, label, icon]) => (
                   <button
                     key={key}
-                    onClick={() => handleFilterChange(key as ConversationFilter)}
+                    onClick={() => handleTabChange(key as BrowseTab)}
                     style={{
                       flex: 1, padding: '10px', display: 'flex', alignItems: 'center',
                       justifyContent: 'center', gap: '6px',
-                      border: 'none', borderBottom: filter === key ? '2px solid #10a37f' : '2px solid transparent',
+                      border: 'none', borderBottom: browseTab === key ? '2px solid #10a37f' : '2px solid transparent',
                       backgroundColor: 'transparent',
-                      color: filter === key ? '#10a37f' : 'var(--node-text-muted)',
-                      cursor: 'pointer', fontSize: '13px', fontWeight: filter === key ? 600 : 400,
+                      color: browseTab === key ? '#10a37f' : 'var(--node-text-muted)',
+                      cursor: 'pointer', fontSize: '13px', fontWeight: browseTab === key ? 600 : 400,
                     }}
                   >
                     {icon} {label}
@@ -475,47 +537,57 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
               </div>
 
               {loading ? (
-                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--node-text-muted)' }}>
-                  <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
-                  <div style={{ fontSize: '13px' }}>Chargement...</div>
-                </div>
-              ) : conversations.length === 0 ? (
-                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--node-text-muted)', fontSize: '14px' }}>
-                  {filter === 'archived' ? 'Aucune conversation archivee' : 'Aucune conversation trouvee'}
-                </div>
-              ) : (
-                conversations.map((conv) => (
-                  <div
-                    key={conv.id}
-                    onClick={() => handleSelect(conv)}
-                    style={{
-                      padding: '12px 20px', display: 'flex', alignItems: 'center',
-                      gap: '12px', cursor: 'pointer',
-                      borderBottom: '1px solid var(--panel-border)',
-                      transition: 'background var(--transition-fast)',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--primary-subtle)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                  >
-                    <MessageSquare size={16} style={{ color: 'var(--node-text-muted)', flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        fontSize: '14px', fontWeight: 500, color: 'var(--node-text)',
-                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                      }}>
-                        {conv.title}
-                      </div>
-                      {conv.created_at && (
-                        <div style={{ fontSize: '12px', color: 'var(--node-text-muted)', marginTop: '2px' }}>
-                          {formatDate(conv.created_at)}
+                <LoadingSpinner />
+              ) : browseTab === 'projects' ? (
+                /* Projects list */
+                projects.length === 0 ? (
+                  <EmptyState text="Aucun projet trouve" />
+                ) : (
+                  projects.map((project) => (
+                    <div
+                      key={project.id}
+                      onClick={() => loadProjectConversations(project, 0)}
+                      style={listItemStyle}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--primary-subtle)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <FolderOpen size={16} style={{ color: '#10a37f', flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={listItemTitleStyle}>{project.name}</div>
+                        <div style={listItemSubStyle}>
+                          {project.conversation_count != null && `${project.conversation_count} conversations`}
+                          {project.conversation_count != null && project.created_at && ' · '}
+                          {project.created_at && formatDate(project.created_at)}
                         </div>
-                      )}
+                      </div>
+                      <ChevronRight size={16} style={{ color: 'var(--node-text-muted)', flexShrink: 0 }} />
                     </div>
-                    <ChevronRight size={16} style={{ color: 'var(--node-text-muted)', flexShrink: 0 }} />
-                  </div>
-                ))
+                  ))
+                )
+              ) : (
+                /* Conversations list */
+                <ConversationList
+                  conversations={conversations}
+                  onSelect={handleSelect}
+                  formatDate={formatDate}
+                  emptyText={browseTab === 'archived' ? 'Aucune conversation archivee' : 'Aucune conversation trouvee'}
+                />
               )}
             </>
+          )}
+
+          {/* ── Project Conversations ── */}
+          {view === 'project-conversations' && (
+            loading ? (
+              <LoadingSpinner />
+            ) : (
+              <ConversationList
+                conversations={conversations}
+                onSelect={handleSelect}
+                formatDate={formatDate}
+                emptyText="Aucune conversation dans ce projet"
+              />
+            )
           )}
 
           {/* ── Preview ── */}
@@ -578,33 +650,16 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
         </div>
 
         {/* Footer */}
-        {(view === 'list' || view === 'preview') && (
+        {(view === 'browse' && browseTab !== 'projects' || view === 'project-conversations' || view === 'preview') && (
           <div style={{
             padding: '12px 20px', borderTop: '1px solid var(--panel-border)',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             background: 'var(--panel-bg-secondary)',
           }}>
-            {view === 'list' ? (
+            {view === 'preview' ? (
               <>
-                <span style={{ fontSize: '12px', color: 'var(--node-text-muted)' }}>
-                  {total > 0 ? `${offset + 1}\u2013${Math.min(offset + limit, total)} sur ${total}` : ''}
-                </span>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  {hasPrev && (
-                    <button onClick={() => loadConversations(Math.max(0, offset - limit))} style={paginationBtnStyle}>
-                      Precedent
-                    </button>
-                  )}
-                  {hasMore && (
-                    <button onClick={() => loadConversations(offset + limit)} style={paginationBtnStyle}>
-                      Suivant
-                    </button>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                <span style={{ fontSize: '12px', color: 'var(--node-text-muted)' }}>
+                <span style={{ fontSize: '12px', color: 'var(--node-text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <SourceBadge source="chatgpt" />
                   {previewMessages.length} messages
                 </span>
                 <button
@@ -625,6 +680,44 @@ export function ImportConversationDialog({ graphId, onClose, onImported }: Impor
                   {importing ? 'Import en cours...' : 'Importer'}
                 </button>
               </>
+            ) : (
+              <>
+                <span style={{ fontSize: '12px', color: 'var(--node-text-muted)' }}>
+                  {total > 0 ? `${offset + 1}\u2013${Math.min(offset + limit, total)} sur ${total}` : ''}
+                </span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {hasPrev && (
+                    <button
+                      onClick={() => {
+                        const newOffset = Math.max(0, offset - limit);
+                        if (view === 'project-conversations' && selectedProject) {
+                          loadProjectConversations(selectedProject, newOffset);
+                        } else {
+                          loadConversations(newOffset);
+                        }
+                      }}
+                      style={paginationBtnStyle}
+                    >
+                      Precedent
+                    </button>
+                  )}
+                  {hasMore && (
+                    <button
+                      onClick={() => {
+                        const newOffset = offset + limit;
+                        if (view === 'project-conversations' && selectedProject) {
+                          loadProjectConversations(selectedProject, newOffset);
+                        } else {
+                          loadConversations(newOffset);
+                        }
+                      }}
+                      style={paginationBtnStyle}
+                    >
+                      Suivant
+                    </button>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
@@ -641,6 +734,12 @@ const backBtnStyle: React.CSSProperties = {
   padding: '4px', display: 'flex', borderRadius: 'var(--radius-sm)',
 };
 
+const stepBadgeStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  width: '20px', height: '20px', borderRadius: '50%',
+  backgroundColor: '#10a37f', color: 'white', fontSize: '11px', fontWeight: 700,
+};
+
 const kbdStyle: React.CSSProperties = {
   display: 'inline-block', padding: '1px 6px',
   fontSize: '11px', fontFamily: 'Consolas, Monaco, monospace',
@@ -655,6 +754,100 @@ const paginationBtnStyle: React.CSSProperties = {
   backgroundColor: 'var(--panel-bg)', color: 'var(--node-text)',
   cursor: 'pointer',
 };
+
+const listItemStyle: React.CSSProperties = {
+  padding: '12px 20px', display: 'flex', alignItems: 'center',
+  gap: '12px', cursor: 'pointer',
+  borderBottom: '1px solid var(--panel-border)',
+  transition: 'background var(--transition-fast)',
+};
+
+const listItemTitleStyle: React.CSSProperties = {
+  fontSize: '14px', fontWeight: 500, color: 'var(--node-text)',
+  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+};
+
+const listItemSubStyle: React.CSSProperties = {
+  fontSize: '12px', color: 'var(--node-text-muted)', marginTop: '2px',
+};
+
+function LoadingSpinner() {
+  return (
+    <div style={{ padding: '40px', textAlign: 'center', color: 'var(--node-text-muted)' }}>
+      <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+      <div style={{ fontSize: '13px' }}>Chargement...</div>
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div style={{ padding: '40px', textAlign: 'center', color: 'var(--node-text-muted)', fontSize: '14px' }}>
+      {text}
+    </div>
+  );
+}
+
+function ConversationList({ conversations, onSelect, formatDate, emptyText }: {
+  conversations: ConversationSummary[];
+  onSelect: (conv: ConversationSummary) => void;
+  formatDate: (d: string | null) => string;
+  emptyText: string;
+}) {
+  if (conversations.length === 0) return <EmptyState text={emptyText} />;
+
+  return (
+    <>
+      {conversations.map((conv) => (
+        <div
+          key={conv.id}
+          onClick={() => onSelect(conv)}
+          style={listItemStyle}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--primary-subtle)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          <MessageSquare size={16} style={{ color: 'var(--node-text-muted)', flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={listItemTitleStyle}>{conv.title}</div>
+              <SourceBadge source={conv.source} />
+            </div>
+            {conv.created_at && (
+              <div style={listItemSubStyle}>{formatDate(conv.created_at)}</div>
+            )}
+          </div>
+          <ChevronRight size={16} style={{ color: 'var(--node-text-muted)', flexShrink: 0 }} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+const SOURCE_COLORS: Record<string, string> = {
+  chatgpt: '#10a37f',
+  claude: '#cc785c',
+  gemini: '#4285f4',
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  chatgpt: 'ChatGPT',
+  claude: 'Claude',
+  gemini: 'Gemini',
+};
+
+function SourceBadge({ source }: { source: string }) {
+  const color = SOURCE_COLORS[source] || '#64748b';
+  const label = SOURCE_LABELS[source] || source;
+  return (
+    <span style={{
+      fontSize: '10px', fontWeight: 600, padding: '1px 6px',
+      borderRadius: '3px', backgroundColor: color + '20', color,
+      whiteSpace: 'nowrap', flexShrink: 0,
+    }}>
+      {label}
+    </span>
+  );
+}
 
 function ModeButton({ active, onClick, label, description }: {
   active: boolean; onClick: () => void; label: string; description: string;

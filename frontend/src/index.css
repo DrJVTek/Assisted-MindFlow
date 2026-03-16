@@ -216,3 +216,58 @@
 .animate-spin-slow {
   animation: spin 3s linear infinite;
 }
+
+/* ============================================================
+   Node Execution Status Indicators
+   ============================================================ */
+
+/* Pulsing blue glow while executing (queued/streaming) */
+@keyframes node-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(33, 150, 243, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(33, 150, 243, 0.6); }
+}
+
+.mindflow-node--executing {
+  animation: node-pulse 1.5s ease-in-out infinite;
+}
+
+/* Brief green flash on completion */
+@keyframes node-complete {
+  0% { box-shadow: 0 0 16px rgba(76, 175, 80, 0.6); }
+  100% { box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); }
+}
+
+.mindflow-node--complete {
+  animation: node-complete 1.5s ease-out forwards;
+}
+
+/* Brief red flash on error */
+@keyframes node-error {
+  0%, 30% { box-shadow: 0 0 12px rgba(244, 67, 54, 0.5); }
+  100% { box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); }
+}
+
+.mindflow-node--error {
+  animation: node-error 2s ease-out forwards;
+}
+
+/* Pulsing dot in title bar during execution */
+@keyframes node-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Spinner animation for loader icons */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .mindflow-node--executing,
+  .mindflow-node--complete,
+  .mindflow-node--error {
+    animation: none;
+  }
+}

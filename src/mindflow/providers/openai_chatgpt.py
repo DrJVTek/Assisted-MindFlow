@@ -10,11 +10,17 @@ This is NOT the same as the OpenAI Platform API (api.openai.com).
 import base64
 import json
 import logging
-from typing import AsyncIterator, Dict, Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 import httpx
 
-from mindflow.providers.base import LLMProvider
+from mindflow.providers.base import (
+    CredentialSpec,
+    LLMProvider,
+    ModelInfo,
+    ProviderResponse,
+    ProviderStatus,
+)
 from mindflow.services.oauth_service import OAuthService
 from mindflow.services.token_storage import TokenStorage
 
@@ -33,7 +39,6 @@ CHATGPT_MODELS = [
     "codex-mini-latest",
 ]
 
-# Default model for new users
 DEFAULT_MODEL = "gpt-5.1-codex"
 
 
@@ -43,7 +48,6 @@ def _decode_jwt_payload(token: str) -> dict:
         parts = token.split(".")
         if len(parts) != 3:
             return {}
-        # Add padding if needed
         payload_b64 = parts[1]
         padding = 4 - len(payload_b64) % 4
         if padding != 4:
@@ -66,6 +70,8 @@ class OpenAIChatGPTProvider(LLMProvider):
 
     Uses the ChatGPT backend Responses API (same as Codex CLI),
     NOT the OpenAI Platform Chat Completions API.
+
+    Requires explicit oauth_service and token_storage injection.
     """
 
     def __init__(
@@ -73,28 +79,56 @@ class OpenAIChatGPTProvider(LLMProvider):
         oauth_service: Optional[OAuthService] = None,
         token_storage: Optional[TokenStorage] = None,
     ):
+        if not oauth_service and not token_storage:
+            raise ValueError(
+                "ChatGPT provider requires either oauth_service or token_storage. "
+                "Pass them explicitly — no default fallback."
+            )
+        super().__init__()
         self._storage = token_storage or TokenStorage()
         self._oauth_service = oauth_service or OAuthService(self._storage)
 
-    async def _get_auth(self) -> tuple[str, str]:
-        """Get valid token and account ID.
+    # ── Connection lifecycle ─────────────────────────────────────
 
-        Returns:
-            Tuple of (access_token, chatgpt_account_id)
-        """
+    async def connect(self) -> None:
+        """Verify OAuth session is valid."""
+        self._status = ProviderStatus.CONNECTING
+        try:
+            token = await self._oauth_service.get_valid_token()
+            if not token:
+                raise ConnectionError(
+                    "No valid ChatGPT OAuth session. Please sign in via Settings."
+                )
+            account_id = _extract_account_id(token)
+            if not account_id:
+                raise ConnectionError(
+                    "Could not extract ChatGPT account ID from token. "
+                    "Please sign out and sign in again."
+                )
+            self._status = ProviderStatus.CONNECTED
+        except ConnectionError:
+            self._status = ProviderStatus.ERROR
+            raise
+        except Exception as exc:
+            self._status = ProviderStatus.ERROR
+            self._error = str(exc)
+            raise ConnectionError(f"ChatGPT connection failed: {exc}") from exc
+
+    # ── Internal helpers ─────────────────────────────────────────
+
+    async def _get_auth(self) -> tuple[str, str]:
+        """Get valid token and account ID."""
         token = await self._oauth_service.get_valid_token()
         if not token:
             raise RuntimeError(
                 "No valid ChatGPT OAuth session. Please sign in via Settings."
             )
-
         account_id = _extract_account_id(token)
         if not account_id:
             raise RuntimeError(
                 "Could not extract ChatGPT account ID from token. "
                 "Please sign out and sign in again."
             )
-
         return token, account_id
 
     def _build_headers(self, token: str, account_id: str) -> dict:
@@ -113,7 +147,7 @@ class OpenAIChatGPTProvider(LLMProvider):
         prompt: str,
         model: str,
         system_prompt: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> dict:
         """Build Responses API request body."""
         input_items = []
@@ -133,9 +167,7 @@ class OpenAIChatGPTProvider(LLMProvider):
 
         instructions = system_prompt or "You are a helpful assistant."
 
-        # ChatGPT backend REQUIRES stream=true always (confirmed via testing).
-        # For non-streaming calls, we collect the full SSE response.
-        body = {
+        return {
             "model": model,
             "instructions": instructions,
             "input": input_items,
@@ -151,18 +183,23 @@ class OpenAIChatGPTProvider(LLMProvider):
             "include": ["reasoning.encrypted_content"],
         }
 
-        return body
-
-    def _extract_text_from_response(self, data: dict) -> str:
-        """Extract text content from a Responses API response."""
-        output = data.get("output", [])
-        texts = []
-        for item in output:
-            if item.get("type") == "message" and item.get("role") == "assistant":
-                for content in item.get("content", []):
-                    if content.get("type") == "output_text":
-                        texts.append(content.get("text", ""))
-        return "".join(texts)
+    def _check_error_status(self, status_code: int) -> None:
+        """Raise user-friendly errors for known HTTP status codes."""
+        if status_code == 401:
+            raise RuntimeError(
+                "Session expired. Please sign in again via Settings."
+            )
+        if status_code in (429, 404):
+            self._status = ProviderStatus.RATE_LIMITED
+            raise RuntimeError(
+                "Rate limit reached. Your ChatGPT subscription has a usage cap. "
+                "Please wait a moment and try again."
+            )
+        if status_code == 403:
+            raise RuntimeError(
+                "This model is not available with your current subscription tier. "
+                "Try selecting a different model in Settings."
+            )
 
     async def _collect_sse_text(self, response: httpx.Response) -> str:
         """Collect all text deltas from an SSE stream into a single string."""
@@ -175,59 +212,15 @@ class OpenAIChatGPTProvider(LLMProvider):
                 break
             try:
                 event = json.loads(data_str)
-            except json.JSONDecodeError:
-                continue
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"ChatGPT returned invalid SSE JSON: {data_str!r}"
+                ) from exc
             if event.get("type") == "response.output_text.delta":
                 delta = event.get("delta", "")
                 if delta:
                     texts.append(delta)
         return "".join(texts)
-
-    def _check_error_status(self, status_code: int) -> None:
-        """Raise user-friendly errors for known HTTP status codes."""
-        if status_code == 429 or status_code == 404:
-            raise RuntimeError(
-                "Rate limit reached. Your ChatGPT subscription has a usage cap. "
-                "Please wait a moment and try again."
-            )
-        if status_code == 403:
-            raise RuntimeError(
-                "This model is not available with your current subscription tier. "
-                "Try selecting a different model in Settings."
-            )
-
-    async def generate(
-        self,
-        prompt: str,
-        model: str,
-        system_prompt: Optional[str] = None,
-        metadata: Dict[str, Any] = None,
-    ) -> str:
-        """Generate complete response using ChatGPT backend Responses API.
-
-        Always uses SSE streaming (backend requires it), then collects the full text.
-        """
-        token, account_id = await self._get_auth()
-        headers = self._build_headers(token, account_id)
-        body = self._build_request_body(prompt, model, system_prompt, metadata)
-
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                async with client.stream(
-                    "POST", CHATGPT_BACKEND_URL, headers=headers, json=body,
-                ) as response:
-                    if response.status_code == 401:
-                        return await self._handle_401_generate(
-                            prompt, model, system_prompt, metadata
-                        )
-                    self._check_error_status(response.status_code)
-                    response.raise_for_status()
-                    return await self._collect_sse_text(response)
-
-        except httpx.HTTPStatusError as exc:
-            raise RuntimeError(
-                f"ChatGPT API error: {exc.response.status_code}"
-            ) from exc
 
     async def _refresh_auth(self) -> tuple[str, str]:
         """Refresh token and return new (token, account_id)."""
@@ -243,81 +236,104 @@ class OpenAIChatGPTProvider(LLMProvider):
             raise RuntimeError("Could not extract account ID after token refresh.")
         return token, account_id
 
-    async def _handle_401_generate(
+    # ── Generation ───────────────────────────────────────────────
+
+    async def generate(
         self,
         prompt: str,
         model: str,
-        system_prompt: Optional[str],
-        metadata: Optional[Dict[str, Any]],
-    ) -> str:
-        """Retry generate after 401 with refreshed token."""
-        token, account_id = await self._refresh_auth()
-        headers = self._build_headers(token, account_id)
-        body = self._build_request_body(prompt, model, system_prompt, metadata)
+        system_prompt: Optional[str] = None,
+        **kwargs: Any,
+    ) -> ProviderResponse:
+        """Generate complete response using ChatGPT backend Responses API.
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream(
-                "POST", CHATGPT_BACKEND_URL, headers=headers, json=body,
-            ) as response:
-                response.raise_for_status()
-                return await self._collect_sse_text(response)
+        Always uses SSE streaming (backend requires it), then collects the full text.
+        """
+        token, account_id = await self._get_auth()
+        headers = self._build_headers(token, account_id)
+        body = self._build_request_body(prompt, model, system_prompt, **kwargs)
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream(
+                    "POST", CHATGPT_BACKEND_URL, headers=headers, json=body,
+                ) as response:
+                    if response.status_code == 401:
+                        # One retry after token refresh
+                        token, account_id = await self._refresh_auth()
+                        headers = self._build_headers(token, account_id)
+
+                async with client.stream(
+                    "POST", CHATGPT_BACKEND_URL, headers=headers, json=body,
+                ) as response:
+                    self._check_error_status(response.status_code)
+                    response.raise_for_status()
+                    content = await self._collect_sse_text(response)
+
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"ChatGPT API error: {exc.response.status_code}"
+            ) from exc
+
+        return ProviderResponse(
+            content=content,
+            model=model,
+        )
 
     async def stream(
         self,
         prompt: str,
         model: str,
         system_prompt: Optional[str] = None,
-        metadata: Dict[str, Any] = None,
+        **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Stream response using ChatGPT backend Responses API (SSE)."""
         token, account_id = await self._get_auth()
         headers = self._build_headers(token, account_id)
-        body = self._build_request_body(prompt, model, system_prompt, metadata)
+        body = self._build_request_body(prompt, model, system_prompt, **kwargs)
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
-                "POST",
-                CHATGPT_BACKEND_URL,
-                headers=headers,
-                json=body,
+                "POST", CHATGPT_BACKEND_URL, headers=headers, json=body,
             ) as response:
-                if response.status_code == 401:
-                    # Can't easily retry streaming; raise error
-                    raise RuntimeError(
-                        "Session expired. Please sign in again via Settings."
-                    )
-
-                if response.status_code == 429 or response.status_code == 404:
-                    raise RuntimeError(
-                        "Rate limit reached. Your ChatGPT subscription has a usage cap. "
-                        "Please wait a moment and try again."
-                    )
-
-                if response.status_code == 403:
-                    raise RuntimeError(
-                        "This model is not available with your current subscription tier. "
-                        "Try selecting a different model in Settings."
-                    )
-
+                self._check_error_status(response.status_code)
                 response.raise_for_status()
 
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
-
-                    data_str = line[6:]  # Strip "data: " prefix
+                    data_str = line[6:]
                     if data_str == "[DONE]":
                         break
-
                     try:
                         event = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-
-                    # Extract text deltas from SSE events
-                    event_type = event.get("type", "")
-
-                    if event_type == "response.output_text.delta":
+                    except json.JSONDecodeError as exc:
+                        raise RuntimeError(
+                            f"ChatGPT returned invalid SSE JSON: {data_str!r}"
+                        ) from exc
+                    if event.get("type") == "response.output_text.delta":
                         delta = event.get("delta", "")
                         if delta:
                             yield delta
+
+    # ── Model discovery ──────────────────────────────────────────
+
+    async def list_models(self) -> list[ModelInfo]:
+        """List known ChatGPT/Codex models."""
+        return [
+            ModelInfo(id=model_id, name=model_id)
+            for model_id in CHATGPT_MODELS
+        ]
+
+    # ── Credential specification ─────────────────────────────────
+
+    @classmethod
+    def required_credentials(cls) -> list[CredentialSpec]:
+        return [
+            CredentialSpec(
+                key="oauth_token",
+                label="ChatGPT OAuth Session",
+                type="oauth",
+                required=True,
+            ),
+        ]

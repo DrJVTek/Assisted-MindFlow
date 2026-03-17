@@ -153,8 +153,9 @@ class Orchestrator:
                                 inputs[input_name] = opts.get("default", opts["options"][0])
                             elif "default" in opts:
                                 inputs[input_name] = opts["default"]
-                except Exception:
-                    pass  # INPUT_TYPES call failed — continue without defaults
+                except Exception as e:
+                    logger.warning("INPUT_TYPES() failed for node %s (class=%s): %s",
+                                   node_id, node.class_type, e)
 
         # Substitute template variables in string inputs: {{var_name}}
         inputs = self._substitute_template_vars(inputs)
@@ -190,10 +191,22 @@ class Orchestrator:
         return result
 
     def _get_node_class(self, node_id: UUID) -> Any:
-        """Get the plugin class for a node, falling back to text_input."""
+        """Get the plugin class for a node.
+
+        Returns None only for nodes with no class_type (plain text nodes).
+        Raises ValueError if class_type is set but not found in registry.
+        """
         node = self._graph.nodes[node_id]
-        class_type = node.class_type or "text_input"
-        return self._registry.node_classes.get(class_type)
+        class_type = node.class_type
+        if not class_type:
+            return self._registry.node_classes.get("text_input")
+        node_cls = self._registry.node_classes.get(class_type)
+        if node_cls is None:
+            raise ValueError(
+                f"Unknown node class_type '{class_type}' for node {node_id}. "
+                f"Is the plugin loaded? Available: {list(self._registry.node_classes.keys())}"
+            )
+        return node_cls
 
     async def _resolve_provider(self, node_id: UUID) -> Any:
         """Resolve the provider instance for a node.
@@ -247,7 +260,7 @@ class Orchestrator:
         node_cls = self._get_node_class(node_id)
 
         if node_cls is None:
-            # Unknown node type — pass through content
+            # Plain text node (no class_type) — pass through content
             outputs = {"text": node.content or ""}
             self._outputs[node_id] = outputs
             return outputs
@@ -266,7 +279,10 @@ class Orchestrator:
         func = getattr(instance, func_name, None)
 
         if func is None:
-            outputs = {"text": node.content or ""}
+            raise ValueError(
+                f"Node class '{node.class_type}' has no function '{func_name}'. "
+                f"Check the plugin's FUNCTION attribute."
+            )
             self._outputs[node_id] = outputs
             return outputs
 
@@ -437,14 +453,10 @@ class Orchestrator:
         stream_func = getattr(instance, "stream", None)
 
         if stream_func is None:
-            logger.info("Node %s has no stream method, falling back to batch execute", node_id)
-            # Fall back to batch execute
-            outputs = await self._execute_node(node_id)
-            yield {
-                "event": "node_complete",
-                "data": {"node_id": str(node_id), "outputs": outputs},
-            }
-            return
+            raise ValueError(
+                f"Node class '{node.class_type}' declares STREAMING=True "
+                f"but has no stream() method."
+            )
 
         # Stream tokens one by one
         logger.info("Starting stream for node %s with model=%s", node_id, inputs.get("model", "?"))
@@ -484,57 +496,3 @@ class Orchestrator:
             "data": {"node_id": str(node_id), "outputs": outputs},
         }
 
-    async def _stream_terminal_node(
-        self, node_id: UUID, node_cls: Any
-    ) -> dict[str, Any]:
-        """Stream the terminal node's output token-by-token.
-
-        For SSE, tokens are yielded via the parent stream_execute generator.
-        Here we collect the full response for the outputs dict.
-
-        NOTE: This method is called internally. Token events are emitted
-        by the execution.py route handler that wraps this.
-        """
-        node = self._graph.nodes[node_id]
-        inputs = self._resolve_inputs(node_id)
-
-        provider = await self._resolve_provider(node_id)
-        if provider is not None:
-            inputs["provider"] = provider
-
-        instance = node_cls()
-
-        # Use stream method
-        stream_func = getattr(instance, "stream", None)
-        if stream_func is None:
-            # Fall back to batch execute
-            return await self._execute_node(node_id)
-
-        # Collect streamed tokens into full response
-        tokens = []
-        async for token in stream_func(**inputs):
-            tokens.append(token)
-            # Token events are handled at the route level
-            # Here we just collect
-
-        full_response = "".join(tokens)
-
-        # Build outputs
-        return_names = getattr(node_cls, "RETURN_NAMES", ("response",))
-        outputs: dict[str, Any] = {}
-        if return_names:
-            outputs[return_names[0]] = full_response
-        # Build context if the node has a context output
-        if len(return_names) > 1 and return_names[1] == "context":
-            context = inputs.get("context", "")
-            prompt = inputs.get("prompt", node.content or "")
-            if context:
-                context += "\n\n"
-            context += f"User: {prompt}\nAssistant: {full_response}"
-            outputs["context"] = context
-        # Expose prompt as output if declared
-        if "prompt" in return_names:
-            outputs["prompt"] = inputs.get("prompt", node.content or "")
-
-        self._outputs[node_id] = outputs
-        return outputs

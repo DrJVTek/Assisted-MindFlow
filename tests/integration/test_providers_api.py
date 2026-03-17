@@ -101,7 +101,7 @@ class TestProviderAwareOperationCreation:
         }
 
         op_resp = client.post(
-            f"/api/llm-operations/graphs/{graph_id}/operations",
+            f"/api/llm-operations/graphs/{graph_id}/operations?user_id=test-user",
             json=op_payload,
         )
         assert op_resp.status_code == 200
@@ -134,7 +134,7 @@ class TestProviderAwareOperationCreation:
         }
 
         op_resp = client.post(
-            f"/api/llm-operations/graphs/{graph_id}/operations",
+            f"/api/llm-operations/graphs/{graph_id}/operations?user_id=test-user",
             json=op_payload,
         )
         assert op_resp.status_code == 200

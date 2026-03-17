@@ -156,7 +156,7 @@ function CanvasInner() {
   const graphId = activeCanvas?.graph_id;
 
   // Load graph data from API (only if we have an active canvas)
-  const { graphData, isLoading, error } = useGraphData(graphId || '');
+  const { graphData, isLoading, error, refreshGraph } = useGraphData(graphId || '');
 
   // Viewport management with persistence
   const { saveViewport, fitView, zoomIn, zoomOut } = useViewport(graphId);
@@ -445,17 +445,17 @@ function CanvasInner() {
       closeContextMenu();
 
       // Reload to show new comment
-      window.location.reload();
+      refreshGraph();
     } catch (error) {
       console.error('Error creating comment:', error);
-      alert(`Error creating comment: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Error creating comment:', error);
       closeContextMenu();
     }
-  }, [contextMenu, graphId, closeContextMenu, reactFlowInstance]);
+  }, [contextMenu, graphId, closeContextMenu, reactFlowInstance, refreshGraph]);
 
   const handleCreateGroup = useCallback(async () => {
     if (selectedNodes.length === 0) {
-      alert('Please select at least one node to create a group');
+      console.warn('Cannot create group: no nodes selected');
       closeContextMenu();
       return;
     }
@@ -483,13 +483,13 @@ function CanvasInner() {
       closeContextMenu();
 
       // Reload to show new group
-      window.location.reload();
+      refreshGraph();
     } catch (error) {
       console.error('Error creating group:', error);
-      alert(`Error creating group: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Error creating group:', error);
       closeContextMenu();
     }
-  }, [selectedNodes, graphId, closeContextMenu]);
+  }, [selectedNodes, graphId, closeContextMenu, refreshGraph]);
 
   const handleEditNode = useCallback(() => {
     if (contextMenu?.nodeId) {
@@ -534,7 +534,7 @@ function CanvasInner() {
         console.log('[handleAskLLM] Response cleared successfully');
 
         // Force reload to show cleared state
-        window.location.reload();
+        refreshGraph();
       } catch (error) {
         console.error('[handleAskLLM] Error clearing response:', error);
         // Continue anyway - user wants to regenerate
@@ -544,7 +544,7 @@ function CanvasInner() {
     setLLMNodeId(contextMenu.nodeId);
     setLLMDialogOpen(true);
     closeContextMenu();
-  }, [contextMenu, graphData, graphId, cancelOperation, closeContextMenu]);
+  }, [contextMenu, graphData, graphId, cancelOperation, closeContextMenu, refreshGraph]);
 
   const handleDeleteNode = useCallback(async () => {
     if (!contextMenu?.nodeId || !graphId) return;
@@ -574,13 +574,13 @@ function CanvasInner() {
       closeContextMenu();
 
       // Force reload graph data to show updated graph
-      window.location.reload();
+      refreshGraph();
     } catch (error) {
       console.error('Error deleting node:', error);
-      alert(`Error deleting node: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Error deleting node:', error);
       closeContextMenu();
     }
-  }, [contextMenu, graphData, graphId, closeContextMenu]);
+  }, [contextMenu, graphData, graphId, closeContextMenu, refreshGraph]);
 
   const handleAddChildNode = useCallback(() => {
     if (contextMenu?.nodeId) {
@@ -720,7 +720,7 @@ function CanvasInner() {
         }, 1000);
       } catch (error) {
         console.error('Error creating node:', error);
-        alert(`Error creating node: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        console.error('Error creating node:', error);
       }
     },
     [graphId, nodeCreatorParentId, nodeCreatorPosition, reactFlowInstance, selectNode]
@@ -755,13 +755,13 @@ function CanvasInner() {
         }
 
         // No descendants - just reload
-        window.location.reload();
+        refreshGraph();
       } catch (error) {
         console.error('Error updating node:', error);
-        alert(`Error updating node: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        console.error('Error updating node:', error);
       }
     },
-    [graphId, graphData]
+    [graphId, graphData, refreshGraph]
   );
 
   // Handle cascade regeneration confirmation
@@ -771,35 +771,22 @@ function CanvasInner() {
     try {
       const result = await regenerateCascade(graphId, pendingCascadeNodeId);
 
-      if (result) {
-        console.log('Cascade regeneration result:', result);
-
-        if (result.success) {
-          alert(`Successfully regenerated ${result.regenerated_count} downstream nodes`);
-        } else {
-          alert(`Regenerated ${result.regenerated_count} nodes with ${result.errors.length} errors`);
-        }
-      }
-
-      // Close dialog and reload
       setCascadeDialogOpen(false);
       setPendingCascadeNodeId(null);
-      window.location.reload();
+      refreshGraph();
     } catch (error) {
       console.error('Error in cascade regeneration:', error);
-      alert(`Error regenerating cascade: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setCascadeDialogOpen(false);
       setPendingCascadeNodeId(null);
     }
-  }, [graphId, pendingCascadeNodeId, regenerateCascade]);
+  }, [graphId, pendingCascadeNodeId, regenerateCascade, refreshGraph]);
 
   // Handle cascade cancellation
   const handleCancelCascade = useCallback(() => {
     setCascadeDialogOpen(false);
     setPendingCascadeNodeId(null);
-    // Reload to show the updated node (without cascade)
-    window.location.reload();
-  }, []);
+    refreshGraph();
+  }, [refreshGraph]);
 
   // Handle NodeEditor save
   const handleNodeEditorSave = useCallback(async (nodeId: string, updates: {
@@ -812,12 +799,11 @@ function CanvasInner() {
     try {
       console.log('Updating node via NodeEditor:', nodeId, updates);
       await api.updateNode(graphId, nodeId, updates);
-      window.location.reload();
+      refreshGraph();
     } catch (error) {
       console.error('Error updating node:', error);
-      alert(`Error updating node: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [graphId]);
+  }, [graphId, refreshGraph]);
 
   // Handle node from AggregatePanel
   const handleNavigateToNode = useCallback((nodeId: string) => {
@@ -1371,7 +1357,7 @@ function CanvasInner() {
             }}
             onRestore={async () => {
               // Refresh graph data after restore
-              window.location.reload();
+              refreshGraph();
             }}
           />
         )}

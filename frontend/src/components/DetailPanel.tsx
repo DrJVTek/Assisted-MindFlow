@@ -86,14 +86,14 @@ export function DetailPanel({
   const prevLlmStatusRef = useRef<string | null>(null);
 
   // Node type info (must come before provider resolution)
-  const classType = (node as any).class_type || node.type;
+  const classType = node.class_type || node.type;
   const nodeTypeDef = useNodeTypesStore((s) => s.nodeTypes[classType]);
   const pluginProviderType = useNodeTypesStore((s) => s.getProviderType(classType));
   const headerColor = nodeTypeDef?.ui?.color || '#546E7A';
   const displayName = nodeTypeDef?.display_name || (node.type || 'node').replace(/_/g, ' ');
 
   // Provider info — resolve from explicit provider_id, or auto-detect from plugin category
-  const providerId = (node as any).provider_id || null;
+  const providerId = node.provider_id || null;
   const provider = useProviderStore((s) => {
     // Explicit provider_id takes priority
     if (providerId) return s.providers.find((p) => p.id === providerId);
@@ -111,6 +111,7 @@ export function DetailPanel({
   // Reset when node changes
   useEffect(() => {
     setContent(node.content);
+    savedContentRef.current = node.content;
     setAutoCreatedChildId(null);
     prevLlmStatusRef.current = null;
     // Focus textarea when opening a new empty node
@@ -121,7 +122,7 @@ export function DetailPanel({
 
   // Auto-create child node when LLM response completes
   useEffect(() => {
-    const currentStatus = (node as any).llm_status;
+    const currentStatus = node.llm_status;
     const prevStatus = prevLlmStatusRef.current;
     prevLlmStatusRef.current = currentStatus;
 
@@ -135,7 +136,7 @@ export function DetailPanel({
       onCreateChild(node.id);
       // We'll get the child ID from the callback
     }
-  }, [(node as any).llm_status, node.id, autoCreatedChildId, onCreateChild]);
+  }, [node.llm_status, node.id, autoCreatedChildId, onCreateChild]);
 
   // ─── Handlers ───────────────────────────────────────────────────
 
@@ -143,8 +144,11 @@ export function DetailPanel({
     setContent(newContent);
   }, []);
 
+  const savedContentRef = useRef(node.content);
+
   const handleSaveContent = useCallback(async () => {
-    if (!graphId) return;
+    if (!graphId || content === savedContentRef.current) return;
+    savedContentRef.current = content;
     try {
       await api.updateNode(graphId, node.id, { content });
     } catch (err) {
@@ -206,11 +210,11 @@ export function DetailPanel({
 
   // Priority: live streaming tokens → completed output → persisted response
   const llmResponse = streamingTokens || completedResponse || node.llm_response || null;
-  const llmError = executionError || (node as any).llm_error || null;
-  const isExecuting = executionRunning || (node as any).llm_status === 'queued' || (node as any).llm_status === 'streaming';
+  const llmError = executionError || node.llm_error || null;
+  const isExecuting = executionRunning || node.llm_status === 'queued' || node.llm_status === 'streaming';
   const llmStatus = executionRunning
     ? (streamingTokens ? 'streaming' : 'queued')
-    : (completedResponse ? 'complete' : ((node as any).llm_status || 'idle'));
+    : (completedResponse ? 'complete' : (node.llm_status || 'idle'));
 
   // ─── Render ─────────────────────────────────────────────────────
   return (
@@ -310,10 +314,10 @@ export function DetailPanel({
           {nodeTypeDef && (
             <DynamicNodeView
               nodeTypeDef={nodeTypeDef}
-              values={(node as any).inputs || {}}
+              values={node.inputs || {}}
               onChange={(name, value) => {
                 if (!graphId) return;
-                const updatedInputs = { ...((node as any).inputs || {}), [name]: value };
+                const updatedInputs = { ...(node.inputs || {}), [name]: value };
                 api.updateNode(graphId, node.id, { inputs: updatedInputs } as any)
                   .catch(err => console.error('Failed to save input:', err));
               }}
@@ -342,14 +346,14 @@ export function DetailPanel({
               graphId={graphId}
               content={content}
               llmResponse={llmResponse}
-              llmOperationId={(node as any).llm_operation_id || null}
+              llmOperationId={node.llm_operation_id || null}
               isNewNode={false}
               llmStatus={llmStatus}
               llmError={llmError}
-              promptHeight={(node as any).prompt_height || 300}
-              responseHeight={(node as any).response_height || 300}
-              noteTop={(node as any).note_top || null}
-              noteBottom={(node as any).note_bottom || null}
+              promptHeight={node.prompt_height || 300}
+              responseHeight={node.response_height || 300}
+              noteTop={node.note_top || null}
+              noteBottom={node.note_bottom || null}
               fontSize={14}
               onContentChange={handleContentChange}
               onGenerateClick={handleGenerate}

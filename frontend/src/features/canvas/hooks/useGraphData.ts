@@ -6,7 +6,7 @@
  * the shared canvasStore isLoading (used by canvas CRUD operations).
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useCanvasStore } from '../../../stores/canvasStore';
 import { api } from '../../../services/api';
 
@@ -62,5 +62,22 @@ export function useGraphData(graphId: string | null) {
     fetchGraph();
   }, [graphId, setGraphData, graphData]);
 
-  return { graphData, isLoading, error };
+  /** Force re-fetch graph data from the API, bypassing cache. */
+  const refreshGraph = useCallback(async () => {
+    if (!graphId) return;
+    try {
+      setIsLoading(true);
+      setError(null);
+      const graph = await api.getGraph(graphId);
+      setGraphData(graph);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to refresh graph';
+      setError(message);
+      console.error('Failed to refresh graph:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [graphId, setGraphData]);
+
+  return { graphData, isLoading, error, refreshGraph };
 }

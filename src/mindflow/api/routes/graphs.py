@@ -654,8 +654,8 @@ async def restore_node_version(
 class RegenerateCascadeRequest(BaseModel):
     """Request body for cascade regeneration."""
     modified_node_id: str = Field(description="UUID of the node that was modified")
-    llm_provider: str = Field(default="mock", description="LLM provider to use (mock, openai, anthropic, etc.)")
-    llm_model: str = Field(default="mock-model", description="LLM model to use")
+    llm_provider: str = Field(description="LLM provider type (openai, anthropic, ollama, chatgpt_web, gemini)")
+    llm_model: str = Field(description="LLM model identifier")
 
 
 class RegenerateCascadeResponse(BaseModel):

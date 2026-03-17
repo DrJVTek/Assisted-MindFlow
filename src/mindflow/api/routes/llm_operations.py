@@ -80,7 +80,7 @@ class OperationListResponse(BaseModel):
 async def create_operation(
     graph_id: UUID,
     request: CreateOperationRequest,
-    user_id: str = Query("default_user", description="User identifier")
+    user_id: str = Query(description="User identifier")
 ):
     """Create a new LLM operation."""
     try:
@@ -289,28 +289,6 @@ async def list_operations(
     limit: int = Query(100, ge=1, le=1000)
 ):
     """List operations with optional filters."""
-    # Note: OperationStateManager needs a list_operations method
-    # For now, we'll implement a basic filter if the manager supports it
-    # or return empty if not implemented yet.
-    
-    # Assuming state_manager has a list_operations method or we need to add it.
-    # Based on the file view earlier, it seemed to have basic CRUD.
-    # Let's assume we need to add it or it exists.
-    # If it doesn't exist, we might need to add it to OperationStateManager.
-    
-    # Checking previous view_file of operation_state.py (not fully shown, but implied)
-    # I will assume for now we can access the internal storage or add the method.
-    # Since I can't see the full file, I'll use a safe approach accessing the internal dict if possible
-    # or just returning what we can.
-    
-    # Actually, better to implement it properly.
-    # I will assume the method exists or I will add it in a separate step if needed.
-    # For now, let's try to use the internal storage if it's simple, or just skip implementation details
-    # and focus on the API contract.
-    
-    # Let's use a placeholder implementation that mimics the previous behavior but using state_manager
-    # This might require adding list_operations to OperationStateManager if it's missing.
-    
     operations = await state_manager.list_operations(
         graph_id=graph_id,
         node_id=node_id,

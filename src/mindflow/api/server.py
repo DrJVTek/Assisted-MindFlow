@@ -11,7 +11,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from mindflow.api.routes import graphs, viewport, canvases, subgraphs, llm_operations, auth, import_conversations, providers, debates, mcp_connections, node_types, execution, composites
-from mindflow.api.demo_data import create_demo_graph
 from mindflow.plugins.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
@@ -21,15 +20,6 @@ app = FastAPI(
     description="REST API for the Interactive Node Canvas Interface",
     version="1.0.0",
 )
-
-# Demo data disabled - users create their own canvases
-# Uncomment below to load demo graph on startup:
-# @app.on_event("startup")
-# async def startup_event():
-#     """Initialize demo graph data."""
-#     demo_graph = create_demo_graph()
-#     graphs.add_graph_to_storage(demo_graph)
-#     print(f"[OK] Demo graph loaded: {demo_graph.id}")
 
 # Configure CORS based on environment
 ENV = os.getenv("ENV", "development")

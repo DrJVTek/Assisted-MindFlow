@@ -232,7 +232,7 @@ export function useGraphExecution(graphId: string) {
     if (state.executionId) {
       fetch(`/api/graphs/${graphId}/execute/${state.executionId}`, {
         method: 'DELETE',
-      }).catch(() => {});
+      }).catch(err => console.error('Failed to cancel execution:', err));
     }
     setState(prev => ({ ...prev, isExecuting: false }));
   }, [graphId, state.executionId]);

@@ -77,9 +77,10 @@ export interface Node {
   groups: UUID[];
   meta: NodeMetadata;
 
-  // Plugin node inputs and connections (v2.0.0 format)
+  // Plugin node inputs, connections, and provider
   inputs?: Record<string, unknown>;
   connections?: Record<string, { source_node_id: string; output_name: string }>;
+  provider_id?: string | null;
 
   // Feature 009: Inline LLM Response Display
   llm_response?: string | null;

@@ -30,34 +30,9 @@ import type { OperationStatus } from '../stores/llmOperationsStore';
 import { useStreamingContentStore } from '../stores/streamingContentStore';
 
 export interface UseStreamingContentOptions {
-  /**
-   * Callback when streaming completes successfully
-   */
   onComplete?: (tokensUsed: number) => void;
-
-  /**
-   * Callback when streaming fails
-   */
   onError?: (error: string) => void;
-
-  /**
-   * Callback on each token (for analytics, logging, etc.)
-   */
   onToken?: (token: string) => void;
-
-  /**
-   * Auto-reconnect on connection loss
-   */
-  autoReconnect?: boolean;
-
-  /**
-   * Maximum reconnection attempts
-   */
-  maxReconnectAttempts?: number;
-
-  /**
-   * Graph ID for persisting response (Feature 009)
-   */
   graphId?: UUID;
 }
 
@@ -72,15 +47,12 @@ export function useStreamingContent(
     onComplete,
     onError,
     onToken,
-    autoReconnect = true,
-    maxReconnectAttempts = 3,
-    graphId // Feature 009 T015: For persisting llm_response
+    graphId,
   } = options;
 
   // State
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [reconnectAttempts, setReconnectAttempts] = useState(0);
 
   // Refs
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -243,9 +215,6 @@ export function useStreamingContent(
     }
   }, [
     nodeId,
-    autoReconnect,
-    maxReconnectAttempts,
-    reconnectAttempts,
     appendContent,
     clearContent,
     getContent,
@@ -262,6 +231,8 @@ export function useStreamingContent(
   /**
    * Stop streaming (cancel operation)
    */
+  const cancelOperation = useLLMOperationsStore(state => state.cancelOperation);
+
   const stopStreaming = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -269,13 +240,14 @@ export function useStreamingContent(
     }
 
     if (currentOperationRef.current) {
-      // Note: Should call cancel API endpoint here
+      cancelOperation(currentOperationRef.current)
+        .catch(err => console.error('Failed to cancel operation:', err));
       currentOperationRef.current = null;
     }
 
     setIsStreaming(false);
     setError(null);
-  }, []);
+  }, [cancelOperation]);
 
   /**
    * Cleanup on unmount (T038: Handle node deletion during streaming)
@@ -299,8 +271,7 @@ export function useStreamingContent(
   return {
     isStreaming,
     error,
-    reconnectAttempts,
     startStreaming,
-    stopStreaming
+    stopStreaming,
   };
 }

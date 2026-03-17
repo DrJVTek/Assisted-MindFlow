@@ -162,13 +162,19 @@ export function DetailPanel({
   const handleGenerate = useCallback(async () => {
     if (!graphId || !content.trim()) return;
 
-    // Save content first
-    await handleSaveContent();
+    // Save content via API only — do NOT call onUpdate which triggers
+    // Canvas.handleUpdateNode → window.location.reload(), killing the SSE stream
+    try {
+      await api.updateNode(graphId, node.id, { content });
+    } catch (err) {
+      console.error('Failed to save content before execution:', err);
+      return;
+    }
 
     // Use the execution engine — it handles provider resolution,
     // topological sort, context from parents, and SSE streaming
     executeNode(node.id, true);
-  }, [graphId, content, node.id, executeNode, handleSaveContent]);
+  }, [graphId, content, node.id, executeNode]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Ctrl+Enter or Cmd+Enter to send

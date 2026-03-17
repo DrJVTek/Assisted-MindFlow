@@ -331,11 +331,14 @@ class Orchestrator:
         All ancestor nodes execute in batch. The terminal (target) node
         streams its output token-by-token if it supports streaming.
         """
+        logger.info("stream_execute: target=%s", target)
         try:
             execution_order = self._executor.topological_sort(target)
         except CycleDetectedError as e:
             yield {"event": "execution_error", "data": {"error": str(e)}}
             return
+
+        logger.info("Execution order: %s (%d nodes)", [str(n) for n in execution_order], len(execution_order))
 
         yield {
             "event": "execution_start",
@@ -420,15 +423,21 @@ class Orchestrator:
         """
         node = self._graph.nodes[node_id]
         inputs = self._resolve_inputs(node_id)
+        logger.info("Streaming node %s (class=%s), inputs keys: %s",
+                     node_id, node.class_type, list(inputs.keys()))
 
         provider = await self._resolve_provider(node_id)
         if provider is not None:
             inputs["provider"] = provider
+            logger.info("Provider resolved for node %s: %s", node_id, type(provider).__name__)
+        else:
+            logger.warning("No provider resolved for node %s (class=%s)", node_id, node.class_type)
 
         instance = node_cls()
         stream_func = getattr(instance, "stream", None)
 
         if stream_func is None:
+            logger.info("Node %s has no stream method, falling back to batch execute", node_id)
             # Fall back to batch execute
             outputs = await self._execute_node(node_id)
             yield {
@@ -438,6 +447,7 @@ class Orchestrator:
             return
 
         # Stream tokens one by one
+        logger.info("Starting stream for node %s with model=%s", node_id, inputs.get("model", "?"))
         tokens = []
         async for token in stream_func(**inputs):
             tokens.append(token)

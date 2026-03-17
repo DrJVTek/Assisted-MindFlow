@@ -130,6 +130,32 @@ class Orchestrator:
             if context_parts:
                 inputs["context"] = "\n\n".join(context_parts)
 
+        # Fill missing inputs with defaults from INPUT_TYPES metadata
+        node_cls = self._get_node_class(node_id)
+        if node_cls is not None:
+            input_types_func = getattr(node_cls, "INPUT_TYPES", None)
+            if callable(input_types_func):
+                try:
+                    input_types = input_types_func()
+                    for section_name in ("required", "optional"):
+                        section = input_types.get(section_name, {})
+                        for input_name, spec in section.items():
+                            if input_name in inputs:
+                                continue
+                            # Parse spec: ("TYPE", {opts}) or InputSpec
+                            if isinstance(spec, (list, tuple)) and len(spec) >= 2:
+                                type_name = spec[0]
+                                opts = spec[1] if isinstance(spec[1], dict) else {}
+                            else:
+                                continue
+                            # COMBO: default to first option
+                            if type_name == "COMBO" and "options" in opts:
+                                inputs[input_name] = opts.get("default", opts["options"][0])
+                            elif "default" in opts:
+                                inputs[input_name] = opts["default"]
+                except Exception:
+                    pass  # INPUT_TYPES call failed — continue without defaults
+
         # Substitute template variables in string inputs: {{var_name}}
         inputs = self._substitute_template_vars(inputs)
 

@@ -203,14 +203,16 @@ export function DetailPanel({
   const nodeResult = nodeResults[node.id];
   const streamingTokens = nodeResult?.tokens || null;
   const executionError = nodeResult?.error || null;
+  // Final response from outputs (after node_complete)
+  const completedResponse = (nodeResult?.outputs?.response as string) || null;
 
-  // Prefer live streaming tokens over persisted response
-  const llmResponse = streamingTokens || node.llm_response || null;
+  // Priority: live streaming tokens → completed output → persisted response
+  const llmResponse = streamingTokens || completedResponse || node.llm_response || null;
   const llmError = executionError || (node as any).llm_error || null;
   const isExecuting = executionRunning || (node as any).llm_status === 'queued' || (node as any).llm_status === 'streaming';
   const llmStatus = executionRunning
     ? (streamingTokens ? 'streaming' : 'queued')
-    : ((node as any).llm_status || 'idle');
+    : (completedResponse ? 'complete' : ((node as any).llm_status || 'idle'));
 
   // ─── Render ─────────────────────────────────────────────────────
   return (

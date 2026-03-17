@@ -177,16 +177,21 @@ export function useGraphExecution(graphId: string) {
         break;
 
       case 'node_complete':
-        setState(prev => ({
-          ...prev,
-          nodeResults: {
-            ...prev.nodeResults,
-            [data.node_id as string]: {
-              status: 'completed',
-              outputs: data.outputs as Record<string, unknown>,
+        setState(prev => {
+          const nodeId = data.node_id as string;
+          const existing = prev.nodeResults[nodeId] || {};
+          return {
+            ...prev,
+            nodeResults: {
+              ...prev.nodeResults,
+              [nodeId]: {
+                ...existing,  // preserve accumulated tokens from streaming
+                status: 'completed',
+                outputs: data.outputs as Record<string, unknown>,
+              },
             },
-          },
-        }));
+          };
+        });
         break;
 
       case 'node_error':

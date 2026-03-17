@@ -207,6 +207,7 @@ export function visualNodeToReactFlowNode(
       graphId: graphId,
       content: originalNode.content,
       llm_response: originalNode.llm_response,
+      llm_status: originalNode.llm_status || 'idle',
       llm_operation_id: originalNode.llm_operation_id,
       font_size: originalNode.font_size,
       node_width: originalNode.node_width,

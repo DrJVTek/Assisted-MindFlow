@@ -147,23 +147,15 @@ export function DetailPanel({
     if (!graphId) return;
     try {
       await api.updateNode(graphId, node.id, { content });
-      onUpdate?.(node.id, { content } as any);
-      // Mark node and descendants dirty for re-execution
-      fetch(`/api/graphs/${graphId}/nodes/${node.id}/mark-dirty`, {
-        method: 'POST',
-      }).catch(() => {
-        // Non-critical — dirty state will be resolved on next execution
-      });
     } catch (err) {
       console.error('Failed to save content:', err);
     }
-  }, [graphId, node.id, content, onUpdate]);
+  }, [graphId, node.id, content]);
 
   const handleGenerate = useCallback(async () => {
     if (!graphId || !content.trim()) return;
 
-    // Save content via API only — do NOT call onUpdate which triggers
-    // Canvas.handleUpdateNode → window.location.reload(), killing the SSE stream
+    // Save content via API directly (not through onUpdate/Canvas which reloads the page)
     try {
       await api.updateNode(graphId, node.id, { content });
     } catch (err) {
@@ -323,7 +315,6 @@ export function DetailPanel({
                 if (!graphId) return;
                 const updatedInputs = { ...((node as any).inputs || {}), [name]: value };
                 api.updateNode(graphId, node.id, { inputs: updatedInputs } as any)
-                  .then(() => onUpdate?.(node.id, { inputs: updatedInputs } as any))
                   .catch(err => console.error('Failed to save input:', err));
               }}
               excludeTypes={['STRING']}

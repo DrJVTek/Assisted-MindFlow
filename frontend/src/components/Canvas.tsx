@@ -48,6 +48,7 @@ import { NodeEditor } from './NodeEditor';
 import { VersionHistory } from './VersionHistory';
 import { DebateControls } from './DebateControls';
 import { ImportConversationDialog } from './ImportConversationDialog';
+import { LogPanel } from './LogPanel';
 import { CanvasNavigator } from '../features/canvas/components/CanvasNavigator';
 import { api } from '../services/api';
 
@@ -1281,6 +1282,11 @@ function CanvasInner() {
             </button>
           </Panel>
         </ReactFlow>
+
+        {/* Bottom log panel — collapsible dock that surfaces execution
+            events and errors automatically. Fixed-position at the bottom,
+            so it overlays the canvas without affecting React Flow's layout. */}
+        <LogPanel />
 
         {/* Edge hover tooltip — shows the current value flowing through
             the connection. Rendered as a fixed-position div that follows

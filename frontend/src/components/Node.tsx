@@ -12,12 +12,13 @@
  * where the canvas is the conversation map and the panel is the workspace.
  */
 
-import React, { memo, useMemo } from 'react';
+import React, { memo, useMemo, useCallback } from 'react';
 import { Handle, Position } from 'reactflow';
-import { Bot, User, Wrench, Loader, Check, AlertCircle } from 'lucide-react';
+import { Bot, User, Wrench, Loader, Check, AlertCircle, Play, Square } from 'lucide-react';
 import type { NodeType, NodeAuthor, NodeStatus } from '../types/graph';
 import { useNodeTypesStore } from '../stores/nodeTypesStore';
 import { useProviderStore } from '../stores/providerStore';
+import { useExecutionStore } from '../stores/executionStore';
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ interface NodeData {
   currentZoom?: number;
   content?: string;
   id?: string;
+  graphId?: string;
   provider_id?: string | null;
 
   // LLM status
@@ -94,6 +96,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     content = '',
     id,
     nodeId,
+    graphId,
     provider_id,
     llm_status,
     llm_response,
@@ -108,6 +111,36 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     const ct = class_type || type;
     return s.nodeTypes[ct];
   });
+
+  // ─── Quick-run button state ─────────────────────────────────────
+  // Lets the user execute this node directly from the canvas without
+  // opening the DetailPanel. Reads isExecuting + runningNodeId from
+  // the shared executionStore so every node can tell if IT is the one
+  // currently running (and show a spinner) or if some other node is.
+  const executeNode = useExecutionStore((s) => s.executeNode);
+  const cancelExecution = useExecutionStore((s) => s.cancelExecution);
+  const globalIsExecuting = useExecutionStore((s) => s.isExecuting);
+  const runningNodeId = useExecutionStore((s) => s.runningNodeId);
+  const thisIsRunning = globalIsExecuting && runningNodeId === (id || nodeId);
+  // Only show a run button if this node type is something you can "run"
+  // in a meaningful way. Right now that means "has outputs" OR "is an
+  // LLM node". Pure sinks (text_output with RETURN_TYPES=()) are still
+  // runnable — running a sink executes its ancestor chain, which is
+  // exactly what you'd want.
+  const canRun = Boolean(nodeTypeDef);
+
+  const handleRunClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation(); // don't trigger node selection
+      if (!graphId || !id) return;
+      if (thisIsRunning) {
+        cancelExecution(graphId);
+      } else {
+        executeNode(graphId, id, true);
+      }
+    },
+    [graphId, id, thisIsRunning, executeNode, cancelExecution]
+  );
 
   // ─── Derive ports ───────────────────────────────────────────────
   const { inputPorts, outputPorts, headerColor, displayName } = useMemo(() => {
@@ -304,7 +337,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
           {provider && (
             <span style={{
               fontSize: '8px', fontWeight: 500, color: 'rgba(255,255,255,0.6)',
@@ -316,6 +349,49 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
           <div style={{ color: 'rgba(255,255,255,0.6)', display: 'flex' }}>
             {getAuthorIcon(author)}
           </div>
+          {/* Quick-run button — executes this node (and its ancestors)
+              without needing to open the DetailPanel first. Turns into
+              a stop button while the node is running. Disabled when any
+              OTHER node is running so the user can't queue overlapping
+              executions. */}
+          {canRun && (
+            <button
+              onClick={handleRunClick}
+              disabled={globalIsExecuting && !thisIsRunning}
+              title={thisIsRunning ? 'Cancel execution' : 'Run this node (and its ancestors)'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 18,
+                height: 18,
+                padding: 0,
+                borderRadius: 3,
+                border: 'none',
+                backgroundColor: thisIsRunning
+                  ? 'rgba(239, 68, 68, 0.9)'
+                  : 'rgba(255, 255, 255, 0.18)',
+                color: 'white',
+                cursor: (globalIsExecuting && !thisIsRunning) ? 'not-allowed' : 'pointer',
+                opacity: (globalIsExecuting && !thisIsRunning) ? 0.35 : 1,
+                transition: 'background-color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                if (!globalIsExecuting || thisIsRunning) {
+                  e.currentTarget.style.backgroundColor = thisIsRunning
+                    ? 'rgba(239, 68, 68, 1)'
+                    : 'rgba(255, 255, 255, 0.35)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = thisIsRunning
+                  ? 'rgba(239, 68, 68, 0.9)'
+                  : 'rgba(255, 255, 255, 0.18)';
+              }}
+            >
+              {thisIsRunning ? <Square size={9} /> : <Play size={9} fill="currentColor" />}
+            </button>
+          )}
         </div>
       </div>
 

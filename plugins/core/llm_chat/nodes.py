@@ -38,10 +38,17 @@ class LLMChatNode(LLMNode):
     def INPUT_TYPES(cls) -> dict:
         return {
             "required": {
-                "prompt": ("STRING", {"multiline": True}),
+                # Only `model` is strictly required — the prompt is
+                # normally typed directly into the node in the DetailPanel
+                # (stored as node.content, which the orchestrator maps to
+                # inputs["prompt"]). Keeping `prompt` as an OPTIONAL input
+                # port lets advanced users override the typed content by
+                # wiring in a string from elsewhere, without forcing them
+                # to do so.
                 "model": ("COMBO", {"options": []}),
             },
             "optional": {
+                "prompt": ("STRING", {"multiline": True}),
                 "context": ("CONTEXT", {}),
                 "system_prompt": ("STRING", {"multiline": True, "default": ""}),
                 "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.1}),
@@ -54,8 +61,8 @@ class LLMChatNode(LLMNode):
 
     async def execute(
         self,
-        prompt: str,
         model: str,
+        prompt: str = "",
         provider: Any = None,
         context: str = "",
         system_prompt: str = "",
@@ -102,8 +109,8 @@ class LLMChatNode(LLMNode):
 
     async def stream(
         self,
-        prompt: str,
         model: str,
+        prompt: str = "",
         provider: Any = None,
         context: str = "",
         system_prompt: str = "",

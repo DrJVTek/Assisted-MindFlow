@@ -68,13 +68,17 @@ class TestCorePluginDiscovery:
         assert "required" in ti["inputs"]
         assert "text" in ti["inputs"]["required"]
 
-        # Verify llm_chat metadata
+        # Verify llm_chat metadata.
+        # Post spec 015 hotfix: `prompt` moved from required to optional so
+        # advanced users can override the typed content with a connection
+        # without making the port mandatory. Only `model` stays required
+        # (prompt falls back to node.content in the orchestrator).
         lc = node_types["llm_chat"]
         assert lc["category"] == "llm"
         assert lc["display_name"] == "LLM Chat"
         assert lc["streaming"] is True
-        assert "prompt" in lc["inputs"]["required"]
         assert "model" in lc["inputs"]["required"]
+        assert "prompt" in lc["inputs"]["optional"]
 
 
 class TestCorePluginsLoad:

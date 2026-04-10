@@ -169,52 +169,53 @@ function CanvasInner() {
     }
   }, [preferences.theme]);
 
-  // Transform graph data to React Flow format with edge emphasis and zoom-based detail level
-  const { nodes, edges } = useMemo(() => {
-    if (!graphData) {
-      return { nodes: [], edges: [] };
-    }
+  // Base transform: depends ONLY on graphData. This is the canonical
+  // node/edge list straight from the backend, used to initialise and
+  // re-sync localNodes when graphData changes (e.g., after a refresh).
+  // Critically: this does NOT depend on selectedNodeId or currentZoom,
+  // so clicking a node or scrolling to zoom does not trigger a reset of
+  // local drag positions.
+  const baseTransform = useMemo(() => {
+    if (!graphData) return { nodes: [], edges: [] };
+    return transformGraphToReactFlow(graphData);
+  }, [graphData]);
 
-    const { nodes: rfNodes, edges: rfEdges } = transformGraphToReactFlow(graphData);
-
-    // Add current zoom level to node data for conditional rendering
-    const nodesWithZoom = rfNodes.map(node => ({
-      ...node,
-      data: {
-        ...node.data,
-        currentZoom,
-      },
-    }));
-
-    // Emphasize edges connected to selected node
-    if (selectedNodeId) {
-      const emphasizedEdges = rfEdges.map(edge => {
-        const isConnected = edge.source === selectedNodeId || edge.target === selectedNodeId;
-        if (isConnected) {
-          return {
-            ...edge,
-            style: {
-              ...edge.style,
-              strokeWidth: 3,
-              opacity: 1.0,
-              stroke: '#1976D2',
-            },
-            zIndex: 10, // Render on top
-          };
-        }
-        return edge;
-      });
-      return { nodes: nodesWithZoom, edges: emphasizedEdges };
-    }
-
-    return { nodes: nodesWithZoom, edges: rfEdges };
-  }, [graphData, selectedNodeId, currentZoom]);
-
-  // Sync computed nodes/edges to local state (preserving ReactFlow's internal changes during drag)
+  // Sync localNodes/localEdges only when graphData changes.
   useEffect(() => {
-    setLocalNodes(nodes);
-    setLocalEdges(edges);
-  }, [nodes, edges]);
+    setLocalNodes(baseTransform.nodes);
+    setLocalEdges(baseTransform.edges);
+  }, [baseTransform]);
+
+  // Render-time decoration: apply currentZoom into node data and edge
+  // emphasis for the selected node. These are derived from localNodes/
+  // localEdges so drag positions are preserved, and they don't flow back
+  // into state — they're consumed directly by <ReactFlow nodes={...} />.
+  const nodes = useMemo(() => {
+    return localNodes.map(n => ({
+      ...n,
+      data: { ...n.data, currentZoom },
+    }));
+  }, [localNodes, currentZoom]);
+
+  const edges = useMemo(() => {
+    if (!selectedNodeId) return localEdges;
+    return localEdges.map(edge => {
+      const isConnected = edge.source === selectedNodeId || edge.target === selectedNodeId;
+      if (isConnected) {
+        return {
+          ...edge,
+          style: {
+            ...edge.style,
+            strokeWidth: 3,
+            opacity: 1.0,
+            stroke: '#1976D2',
+          },
+          zIndex: 10,
+        };
+      }
+      return edge;
+    });
+  }, [localEdges, selectedNodeId]);
 
   // Find selected node from graph data
   const selectedNode = useMemo(() => {
@@ -1027,8 +1028,8 @@ function CanvasInner() {
         aria-label="Interactive node canvas for reasoning graphs"
       >
         <ReactFlow
-          nodes={localNodes}
-          edges={localEdges}
+          nodes={nodes}
+          edges={edges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onNodeClick={onNodeClick}

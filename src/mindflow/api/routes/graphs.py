@@ -382,9 +382,20 @@ async def update_node(
     if update_req.summary is not None:
         node.summary = update_req.summary
 
-    # Feature 011: Provider and MCP tools
+    # Provider and MCP tools.
+    # Empty string or null clears the provider. A non-empty string is
+    # parsed as a UUID; bad input raises 400 instead of the previous 500.
     if update_req.provider_id is not None:
-        node.provider_id = UUID(update_req.provider_id) if update_req.provider_id else None
+        if update_req.provider_id:
+            try:
+                node.provider_id = UUID(update_req.provider_id)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid provider_id UUID: {update_req.provider_id}",
+                )
+        else:
+            node.provider_id = None
     if update_req.mcp_tools is not None:
         node.mcp_tools = update_req.mcp_tools
 

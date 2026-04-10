@@ -408,19 +408,35 @@ function TabButton({ icon, label, isActive, onClick }: {
     <button
       onClick={onClick}
       style={{
-        padding: '12px 16px',
+        padding: '12px 18px',
         display: 'flex',
         alignItems: 'center',
-        gap: '6px',
+        gap: '8px',
         border: 'none',
         borderBottom: isActive ? '2px solid var(--primary-color)' : '2px solid transparent',
-        backgroundColor: 'transparent',
-        color: isActive ? 'var(--primary-color)' : 'var(--node-text-muted)',
+        // Active: primary color on subtle tinted background.
+        // Inactive: use the main text color, not the muted one — `--node-text-muted`
+        // is nearly invisible on the panel-bg-secondary background.
+        backgroundColor: isActive ? 'var(--primary-subtle, rgba(79, 70, 229, 0.08))' : 'transparent',
+        color: isActive ? 'var(--primary-color)' : 'var(--node-text, #e5e7eb)',
         cursor: 'pointer',
         fontSize: '13px',
-        fontWeight: isActive ? 600 : 500,
-        transition: 'all var(--transition-fast)',
+        fontWeight: isActive ? 700 : 500,
+        transition: 'background-color 0.15s, color 0.15s',
         whiteSpace: 'nowrap',
+        marginBottom: '-1px', // overlap the container's border-bottom so active tab "connects" to the content
+      }}
+      onMouseEnter={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'var(--panel-bg, rgba(255,255,255,0.06))';
+          e.currentTarget.style.color = 'var(--primary-color)';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!isActive) {
+          e.currentTarget.style.backgroundColor = 'transparent';
+          e.currentTarget.style.color = 'var(--node-text, #e5e7eb)';
+        }
       }}
     >
       {icon}

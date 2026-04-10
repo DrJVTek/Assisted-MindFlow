@@ -7,17 +7,18 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { X, Moon, Sun, Grid3x3, Map, Brain, Eye, Save, Plug } from 'lucide-react';
+import { X, Moon, Sun, Grid3x3, Map, Brain, Eye, Save, Plug, Package } from 'lucide-react';
 import { useCanvasStore } from '../stores/canvasStore';
 // OAuthLoginButton removed — OAuth is now inline per-provider in ProviderSettingsPanel
 import { ProviderSettingsPanel } from './ProviderSettingsPanel';
 import { MCPConnectionsPanel } from './MCPConnectionsPanel';
+import { PluginManagerPanel } from './PluginManagerPanel';
 
 interface SettingsPanelProps {
   onClose: () => void;
 }
 
-type Tab = 'appearance' | 'llm_providers' | 'mcp';
+type Tab = 'appearance' | 'llm_providers' | 'mcp' | 'plugins';
 
 interface LLMDefaults {
   temperature: number;
@@ -198,6 +199,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             isActive={activeTab === 'mcp'}
             onClick={() => setActiveTab('mcp')}
           />
+          <TabButton
+            icon={<Package size={15} />}
+            label="Plugins"
+            isActive={activeTab === 'plugins'}
+            onClick={() => setActiveTab('plugins')}
+          />
         </div>
 
         {/* Tab Content */}
@@ -345,6 +352,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
           {activeTab === 'mcp' && (
             <MCPConnectionsPanel />
+          )}
+
+          {activeTab === 'plugins' && (
+            <PluginManagerPanel />
           )}
         </div>
 

@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mindflow.api.routes import graphs, viewport, canvases, subgraphs, auth, import_conversations, providers, debates, mcp_connections, node_types, execution, composites
+from mindflow.api.routes import graphs, viewport, canvases, subgraphs, auth, import_conversations, providers, debates, mcp_connections, node_types, execution, composites, plugins as plugins_route
 from mindflow.plugins.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ app.include_router(mcp_connections.router, prefix="/api")
 app.include_router(node_types.router, prefix="/api")
 app.include_router(execution.router, prefix="/api")
 app.include_router(composites.router, prefix="/api")
+app.include_router(plugins_route.router, prefix="/api")
 
 
 # ── Plugin system startup ──────────────────────────────────────

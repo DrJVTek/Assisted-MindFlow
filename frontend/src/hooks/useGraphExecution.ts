@@ -195,16 +195,21 @@ export function useGraphExecution(graphId: string) {
         break;
 
       case 'node_error':
-        setState(prev => ({
-          ...prev,
-          nodeResults: {
-            ...prev.nodeResults,
-            [data.node_id as string]: {
-              status: 'failed',
-              error: data.error as string,
+        setState(prev => {
+          const nodeId = data.node_id as string;
+          const existing = prev.nodeResults[nodeId] || {};
+          return {
+            ...prev,
+            nodeResults: {
+              ...prev.nodeResults,
+              [nodeId]: {
+                ...existing, // keep any tokens already streamed before the error
+                status: 'failed',
+                error: data.error as string,
+              },
             },
-          },
-        }));
+          };
+        });
         break;
 
       case 'execution_complete':

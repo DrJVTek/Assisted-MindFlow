@@ -43,10 +43,70 @@ def add_graph_to_storage(graph: Graph) -> None:
     logger.info(f"Added graph {graph.id} to storage (memory + disk)")
 
 
+# Legacy plugin class_types that were deleted in spec 015 Étape 5.
+# They are all remapped to the generic "llm_chat" node which takes any
+# provider via its provider_id credential.
+_LEGACY_LLM_TYPES = {
+    "openai_chat",
+    "anthropic_chat",
+    "ollama_chat",
+    "gemini_chat",
+    "chatgpt_web_chat",
+}
+
+# Legacy port names used when the fallback __default_in / __default_out
+# handles created edges. Post-Étape 5, llm_chat uses "prompt" for the
+# input port and "response" for the primary output.
+_LEGACY_PORT_RENAMES = {
+    "input": "prompt",
+    "output": "response",
+}
+
+
+def _migrate_legacy_nodes(graph: Graph) -> bool:
+    """Migrate pre-spec-015 nodes to the new plugin schema.
+
+    Old graphs have nodes with `type` set to a provider-specific plugin
+    (e.g. "chatgpt_web_chat") that no longer exists, and `class_type=None`.
+    Without migration these nodes silently fell back to text_input in the
+    orchestrator, which made Generate look like it did nothing.
+
+    This function walks the graph once and:
+      - Sets class_type="llm_chat" for any legacy LLM type
+      - Renames stale connection port names ("input" → "prompt", etc.)
+
+    Returns True if any change was made (so the caller can persist it).
+    """
+    changed = False
+    for node in graph.nodes.values():
+        node_type = getattr(node, "type", None)
+        if node_type in _LEGACY_LLM_TYPES and not getattr(node, "class_type", None):
+            node.class_type = "llm_chat"
+            changed = True
+
+        if node.connections:
+            renamed: dict[str, dict] = {}
+            for input_name, spec in node.connections.items():
+                new_name = _LEGACY_PORT_RENAMES.get(input_name, input_name)
+                renamed[new_name] = spec
+                if new_name != input_name:
+                    changed = True
+            if changed:
+                node.connections = renamed
+
+    if changed:
+        logger.info(
+            f"Migrated legacy nodes in graph {graph.id}: "
+            f"class_type + port names updated to post-spec-015 schema"
+        )
+    return changed
+
+
 def get_graph_from_storage(graph_id: UUID) -> Graph | None:
     """Get a graph from memory cache, falling back to disk.
 
-    If found on disk but not in memory, loads into cache.
+    If found on disk but not in memory, loads into cache. Runs a one-time
+    in-place migration for pre-spec-015 nodes before caching.
     """
     graph_id_str = str(graph_id)
 
@@ -57,6 +117,8 @@ def get_graph_from_storage(graph_id: UUID) -> Graph | None:
     # Fall back to disk
     graph = _graph_service.load(graph_id)
     if graph is not None:
+        if _migrate_legacy_nodes(graph):
+            _graph_service.save(graph)
         _graphs_storage[graph_id_str] = graph
         logger.info(f"Loaded graph {graph_id} from disk into memory cache")
         return graph
@@ -83,10 +145,13 @@ def _ensure_graph_loaded(graph_id: str) -> None:
     """Ensure graph is in memory cache, loading from disk if needed.
 
     Call at the start of any endpoint that accesses _graphs_storage directly.
+    Runs a one-time legacy-node migration on first load.
     """
     if graph_id not in _graphs_storage:
         graph = _graph_service.load(UUID(graph_id))
         if graph is not None:
+            if _migrate_legacy_nodes(graph):
+                _graph_service.save(graph)
             _graphs_storage[graph_id] = graph
 
 

@@ -212,13 +212,18 @@ class Orchestrator:
     def _get_node_class(self, node_id: UUID) -> Any:
         """Get the plugin class for a node.
 
-        Returns None only for nodes with no class_type (plain text nodes).
-        Raises ValueError if class_type is set but not found in registry.
+        Raises ValueError if class_type is missing or not found in the
+        registry. The previous silent fallback to `text_input` hid legacy
+        data bugs (old nodes with deleted class_types executed as no-ops).
         """
         node = self._graph.nodes[node_id]
         class_type = node.class_type
         if not class_type:
-            return self._registry.node_classes.get("text_input")
+            raise ValueError(
+                f"Node {node_id} has no class_type. Legacy graphs should have "
+                f"been migrated at load time — if you see this error the "
+                f"migration didn't run. Node type attribute: '{node.type}'."
+            )
         node_cls = self._registry.node_classes.get(class_type)
         if node_cls is None:
             raise ValueError(
@@ -242,8 +247,12 @@ class Orchestrator:
         if node.provider_id:
             return self._provider_resolver(str(node.provider_id))
 
-        # 2. Auto-resolve from plugin category
-        class_type = node.class_type or "text_input"
+        # 2. Auto-resolve from plugin category. If class_type is missing
+        # or unknown, no provider can be resolved — the caller will deal
+        # with the None provider.
+        class_type = node.class_type
+        if not class_type:
+            return None
         node_cls = self._registry.node_classes.get(class_type)
         if node_cls is None:
             return None

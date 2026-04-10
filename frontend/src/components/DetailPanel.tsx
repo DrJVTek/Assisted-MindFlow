@@ -106,7 +106,7 @@ export function DetailPanel({
   });
 
   // Graph execution engine
-  const { executeNode, isExecuting: executionRunning, nodeResults, cancelExecution } = useGraphExecution(graphId);
+  const { executeNode, isExecuting: executionRunning, nodeResults, error: executionLevelError, cancelExecution } = useGraphExecution(graphId);
 
   // Parent context
   const parentContext = getParentContext(node, allNodes);
@@ -206,16 +206,25 @@ export function DetailPanel({
   const nodeResult = nodeResults[node.id];
   const streamingTokens = nodeResult?.tokens || null;
   const executionError = nodeResult?.error || null;
-  // Final response from outputs (after node_complete)
-  const completedResponse = (nodeResult?.outputs?.response as string) || null;
+  // Final response from outputs. LLM nodes return `response`, text_input
+  // returns `text`, other nodes may use other names — try the common ones.
+  const outputs = nodeResult?.outputs as Record<string, unknown> | undefined;
+  const completedResponse =
+    (outputs?.response as string) ||
+    (outputs?.text as string) ||
+    (outputs?.output as string) ||
+    null;
 
   // Priority: live streaming tokens → completed output → persisted response
   const llmResponse = streamingTokens || completedResponse || node.llm_response || null;
-  const llmError = executionError || node.llm_error || null;
+  // Error surfacing: node-level (from node_error), then execution-level
+  // (from execution_error — fires when the orchestrator can't even start),
+  // then persisted llm_error.
+  const llmError = executionError || executionLevelError || node.llm_error || null;
   const isExecuting = executionRunning || node.llm_status === 'queued' || node.llm_status === 'streaming';
   const llmStatus = executionRunning
     ? (streamingTokens ? 'streaming' : 'queued')
-    : (completedResponse ? 'complete' : (node.llm_status || 'idle'));
+    : (completedResponse ? 'complete' : (llmError ? 'error' : (node.llm_status || 'idle')));
 
   // ─── Render ─────────────────────────────────────────────────────
   return (

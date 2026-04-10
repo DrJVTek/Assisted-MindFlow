@@ -206,6 +206,9 @@ export function ProviderSettingsPanel() {
 
   // Validation
   const [validatingId, setValidatingId] = useState<string | null>(null);
+  // Per-provider validation error messages, keyed by provider id.
+  // Cleared when the user edits the provider or re-validates successfully.
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   // Confirm delete
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -310,10 +313,16 @@ export function ProviderSettingsPanel() {
 
   const handleValidate = async (id: string) => {
     setValidatingId(id);
+    // Clear any previous error for this provider
+    setValidationErrors((prev) => {
+      const { [id]: _removed, ...rest } = prev;
+      return rest;
+    });
     try {
       await validateProvider(id);
     } catch (err) {
-      console.error('Validation failed:', err);
+      const message = err instanceof Error ? err.message : 'Validation failed';
+      setValidationErrors((prev) => ({ ...prev, [id]: message }));
     } finally {
       setValidatingId(null);
     }
@@ -419,6 +428,19 @@ export function ProviderSettingsPanel() {
                 <ChevronDown className="w-4 h-4 text-gray-400" />
               )}
             </div>
+
+            {/* Inline validation error — always visible when present, so
+                the user doesn't have to expand or open the dev console to
+                know why the status icon turned red. */}
+            {validationErrors[provider.id] && (
+              <div
+                className="px-3 pb-2 text-xs text-red-600 dark:text-red-400 flex items-start gap-2"
+                style={{ lineHeight: 1.4 }}
+              >
+                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                <span>{validationErrors[provider.id]}</span>
+              </div>
+            )}
 
             {/* Expanded detail / edit form */}
             {expandedId === provider.id && (

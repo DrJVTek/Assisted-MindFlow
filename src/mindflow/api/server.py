@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mindflow.api.routes import graphs, viewport, canvases, subgraphs, llm_operations, auth, import_conversations, providers, debates, mcp_connections, node_types, execution, composites
+from mindflow.api.routes import graphs, viewport, canvases, subgraphs, auth, import_conversations, providers, debates, mcp_connections, node_types, execution, composites
 from mindflow.plugins.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,6 @@ app.include_router(graphs.router, prefix="/api")
 app.include_router(viewport.router, prefix="/api")
 app.include_router(canvases.router, prefix="/api")
 app.include_router(subgraphs.router, prefix="/api")
-app.include_router(llm_operations.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(import_conversations.router, prefix="/api")
 app.include_router(providers.router, prefix="/api")

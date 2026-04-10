@@ -29,7 +29,6 @@ import { Settings, RefreshCw, Undo, Redo } from 'lucide-react';
 import 'reactflow/dist/style.css';
 
 import { useCanvasStore } from '../stores/canvasStore';
-import { useLLMOperationsStore } from '../stores/llmOperationsStore';
 import { useGraphData } from '../features/canvas/hooks/useGraphData';
 import { useViewport } from '../features/canvas/hooks/useViewport';
 import { useLayout } from '../features/canvas/hooks/useLayout';
@@ -45,8 +44,6 @@ import { NodeCreator } from './NodeCreator';
 import { NodeEditor } from './NodeEditor';
 import { CascadeRegenDialog } from './CascadeRegenDialog';
 import { VersionHistory } from './VersionHistory';
-import { LLMDialog } from './LLMDialog';
-import { AggregatePanel } from './AggregatePanel';
 import { DebateControls } from './DebateControls';
 import { ImportConversationDialog } from './ImportConversationDialog';
 import { CanvasNavigator } from '../features/canvas/components/CanvasNavigator';
@@ -91,7 +88,6 @@ export function Canvas() {
  */
 function CanvasInner() {
   const { selectNode, preferences, selectedNodeId, createCanvas, canvases, activeCanvasId, fetchCanvases } = useCanvasStore();
-  const { cancelOperation } = useLLMOperationsStore(); // Feature 009 T023
   const [currentZoom, setCurrentZoom] = useState(1.0);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const reactFlowInstance = useReactFlow();
@@ -125,10 +121,6 @@ function CanvasInner() {
   // Version history state
   const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
   const [versionHistoryNodeId, setVersionHistoryNodeId] = useState<string | null>(null);
-
-  // LLM dialog state
-  const [llmDialogOpen, setLLMDialogOpen] = useState(false);
-  const [llmNodeId, setLLMNodeId] = useState<string | null>(null);
 
   // Import conversation dialog state
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -553,44 +545,14 @@ function CanvasInner() {
     }
   }, [contextMenu, closeContextMenu]);
 
-  const handleAskLLM = useCallback(async () => {
-    if (!contextMenu?.nodeId || !graphData || !graphId) return;
-
-    const node = graphData.nodes[contextMenu.nodeId];
-    if (!node) return;
-
-    // Feature 009 T023: Cancel existing operation if present
-    if (node.llm_operation_id) {
-      try {
-        console.log(`[handleAskLLM] Cancelling existing operation: ${node.llm_operation_id}`);
-        await cancelOperation(node.llm_operation_id);
-        console.log('[handleAskLLM] Operation cancelled successfully');
-      } catch (error) {
-        console.error('[handleAskLLM] Error cancelling operation:', error);
-        // Continue anyway - user wants to regenerate
-      }
-
-      // Feature 009 T024: Clear llm_response locally before starting new operation
-      try {
-        console.log(`[handleAskLLM] Clearing llm_response for node ${contextMenu.nodeId}`);
-        await api.updateNode(graphId, contextMenu.nodeId, {
-          llm_response: null,
-          llm_operation_id: null
-        });
-        console.log('[handleAskLLM] Response cleared successfully');
-
-        // Force reload to show cleared state
-        refreshGraph();
-      } catch (error) {
-        console.error('[handleAskLLM] Error clearing response:', error);
-        // Continue anyway - user wants to regenerate
-      }
-    }
-
-    setLLMNodeId(contextMenu.nodeId);
-    setLLMDialogOpen(true);
+  // Ask LLM context menu entry: selects the node so DetailPanel opens with
+  // its Generate button. The orchestrator path in DetailPanel handles the
+  // actual execution — there's no separate dialog anymore.
+  const handleAskLLM = useCallback(() => {
+    if (!contextMenu?.nodeId) return;
+    selectNode(contextMenu.nodeId);
     closeContextMenu();
-  }, [contextMenu, graphData, graphId, cancelOperation, closeContextMenu, refreshGraph]);
+  }, [contextMenu, selectNode, closeContextMenu]);
 
   const handleDeleteNode = useCallback(async () => {
     if (!contextMenu?.nodeId || !graphId) return;
@@ -667,7 +629,6 @@ function CanvasInner() {
         parents: [parentId],
         meta: { position: newPos, status: 'draft', importance: 0.5, ...(createdNode.meta || {}) },
         llm_response: null,
-        llm_operation_id: null,
         provider_id: (parentNode as any).provider_id || null,
       };
 
@@ -728,7 +689,6 @@ function CanvasInner() {
             importance: createdNode.meta?.importance ?? 0.5,
           },
           llm_response: null,
-          llm_operation_id: null,
         };
 
         // Transform through the same pipeline as loaded nodes
@@ -1409,24 +1369,6 @@ function CanvasInner() {
           />
         )}
 
-        {/* LLM Dialog */}
-        {llmDialogOpen && llmNodeId && graphId && (
-          <LLMDialog
-            isOpen={llmDialogOpen}
-            onClose={() => setLLMDialogOpen(false)}
-            nodeId={llmNodeId}
-            graphId={graphId}
-          />
-        )}
-
-        {/* Aggregate Panel - Multi-operation dashboard */}
-        {graphId && (
-          <AggregatePanel
-            graphId={graphId}
-            onNavigateToNode={handleNavigateToNode}
-            initialCollapsed={false}
-          />
-        )}
       </div>
     </div>
   );

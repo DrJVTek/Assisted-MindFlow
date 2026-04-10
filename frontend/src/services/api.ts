@@ -153,9 +153,8 @@ export const api = {
       position?: { x: number; y: number };
       child_ids?: string[];
       llm_response?: string | null;
-      llm_operation_id?: string | null;
       font_size?: number;
-      // Feature 009: Inline LLM fields
+      // Inline LLM fields
       llm_status?: string;
       llm_error?: string | null;
       prompt_height?: number;

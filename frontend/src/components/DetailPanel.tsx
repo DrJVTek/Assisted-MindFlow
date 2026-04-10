@@ -345,7 +345,6 @@ export function DetailPanel({
               graphId={graphId}
               content={content}
               llmResponse={llmResponse}
-              llmOperationId={node.llm_operation_id || null}
               isNewNode={false}
               llmStatus={llmStatus}
               llmError={llmError}

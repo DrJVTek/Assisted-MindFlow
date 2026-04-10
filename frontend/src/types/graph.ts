@@ -82,9 +82,8 @@ export interface Node {
   connections?: Record<string, { source_node_id: string; output_name: string }>;
   provider_id?: string | null;
 
-  // Feature 009: Inline LLM Response Display
+  // Inline LLM Response Display
   llm_response?: string | null;
-  llm_operation_id?: UUID | null;
   font_size?: number; // 10-24, default 14
   node_width?: number; // 280-800, default 400
   node_height?: number; // 200-1200, default 400

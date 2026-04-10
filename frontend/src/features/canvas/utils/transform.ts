@@ -189,12 +189,11 @@ export function visualNodeToReactFlowNode(
       borderWidth: visualNode.style.borderWidth,
       opacity: visualNode.style.opacity,
 
-      // Feature 009: Pass through LLM fields for auto-launch and inline display
+      // Pass through LLM fields for inline display
       graphId: graphId,
       content: originalNode.content,
       llm_response: originalNode.llm_response,
       llm_status: originalNode.llm_status || 'idle',
-      llm_operation_id: originalNode.llm_operation_id,
       font_size: originalNode.font_size,
       node_width: originalNode.node_width,
       node_height: originalNode.node_height,

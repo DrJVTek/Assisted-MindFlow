@@ -27,7 +27,6 @@ export interface LLMNodeContentProps {
   llmResponse: string | null;
   llmStatus: 'idle' | 'queued' | 'streaming' | 'complete' | 'error';
   llmError: string | null;
-  llmOperationId: UUID | null;
   promptHeight: number;
   responseHeight: number;
   noteTop: string | null;
@@ -55,7 +54,6 @@ export function LLMNodeContent({
   llmResponse,
   llmStatus,
   llmError,
-  llmOperationId,
   promptHeight,
   responseHeight,
   noteTop,

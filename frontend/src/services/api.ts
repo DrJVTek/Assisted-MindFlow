@@ -176,6 +176,7 @@ export const api = {
       position?: { x: number; y: number };
       child_ids?: string[];
       llm_response?: string | null;
+      inputs?: Record<string, unknown>;
       font_size?: number;
       // Inline LLM fields
       llm_status?: string;

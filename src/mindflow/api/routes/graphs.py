@@ -211,6 +211,11 @@ class UpdateNodeRequest(BaseModel):
     # Named port connection (ComfyUI-style: input_name → source_node.output_name)
     connection: ConnectionSpec | None = None
 
+    # Plugin node input values (e.g. model, temperature, max_tokens).
+    # Populated by the DetailPanel's dynamic widget editor. Persisted to
+    # Node.inputs and used by the orchestrator at execution time.
+    inputs: dict | None = None
+
     # Feature 009: Inline LLM Response Display
     llm_response: str | None = Field(None, max_length=100000)
 
@@ -420,6 +425,14 @@ async def update_node(
     # Update fields if provided
     if update_req.content is not None:
         node.content = update_req.content
+    if update_req.inputs is not None:
+        # Merge semantics: new keys override existing, unset keys are kept.
+        # The frontend sends the full updated dict, so this effectively
+        # replaces — but using update() is robust if callers ever send
+        # partial patches.
+        if not isinstance(node.inputs, dict):
+            node.inputs = {}
+        node.inputs.update(update_req.inputs)
     if update_req.importance is not None:
         node.meta.importance = update_req.importance
     if update_req.tags is not None:

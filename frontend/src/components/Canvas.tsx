@@ -30,6 +30,7 @@ import 'reactflow/dist/style.css';
 
 import { useCanvasStore } from '../stores/canvasStore';
 import { useNodeTypesStore } from '../stores/nodeTypesStore';
+import { useProviderStore } from '../stores/providerStore';
 import { useGraphData } from '../features/canvas/hooks/useGraphData';
 import { useViewport } from '../features/canvas/hooks/useViewport';
 import { useLayout } from '../features/canvas/hooks/useLayout';
@@ -88,6 +89,7 @@ function CanvasInner() {
   const { selectNode, preferences, selectedNodeId, createCanvas, canvases, activeCanvasId, fetchCanvases } = useCanvasStore();
   const fetchNodeTypes = useNodeTypesStore(s => s.fetchNodeTypes);
   const nodeTypesLoaded = useNodeTypesStore(s => s.isLoaded);
+  const fetchProviders = useProviderStore(s => s.fetchProviders);
   const [currentZoom, setCurrentZoom] = useState(1.0);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const reactFlowInstance = useReactFlow();
@@ -136,15 +138,18 @@ function CanvasInner() {
     () => reactFlowInstance.getNodes()
   );
 
-  // Load canvases and node-type metadata on mount.
-  // nodeTypesStore is the source of truth for port names, colors, display
-  // names, and credential specs — without this call the store stays empty
-  // and every Node falls through to the fallback "input"/"output" ports.
+  // Load canvases, node-type metadata, and providers on mount.
+  // - nodeTypesStore: source of truth for port names, colors, display
+  //   names, and credential specs
+  // - providerStore: list of configured LLM providers shown in the
+  //   DetailPanel Provider dropdown (without this, the dropdown is
+  //   empty and the user can't assign a provider to a node).
   useEffect(() => {
     fetchCanvases();
     if (!nodeTypesLoaded) {
       fetchNodeTypes();
     }
+    fetchProviders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 

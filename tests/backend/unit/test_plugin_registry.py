@@ -355,14 +355,15 @@ class TestCorePluginDiscovery:
         registry = PluginRegistry([core_dir])
         registry.discover_and_load()
 
-        # At minimum: text_input, llm_chat, llm_openai, llm_anthropic,
-        # llm_ollama, llm_chatgpt_web should load (gemini may be skipped
-        # if google-generativeai is not installed)
-        assert len(registry.plugins) >= 6
-        assert len(registry.node_classes) >= 6
+        # After spec 015 Étape 5, only two core plugins exist:
+        # text_input (raw input) and llm_chat (generic LLM, provider-agnostic).
+        # The provider-specific plugins (openai, anthropic, etc.) were deleted
+        # because their execute logic was identical to llm_chat — they only
+        # differed by hardcoded model lists, violating FR-014.
+        assert len(registry.plugins) >= 2
+        assert len(registry.node_classes) >= 2
 
-        # These plugins have no exotic deps and must always load
-        expected_always = {"text_input", "llm_chat", "llm_ollama", "llm_chatgpt_web"}
+        expected_always = {"text_input", "llm_chat"}
         for name in expected_always:
             assert name in registry.plugins, f"Plugin '{name}' should always load"
 

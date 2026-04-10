@@ -171,14 +171,19 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           </button>
         </div>
 
-        {/* Tabs */}
+        {/* Tabs — horizontally scrollable if they don't all fit, so no
+            tab ever gets clipped off the right edge of the panel. */}
         <div
           style={{
             display: 'flex',
             borderBottom: '1px solid var(--panel-border)',
-            padding: '0 24px',
-            gap: '4px',
+            padding: '0 12px',
+            gap: '2px',
             background: 'var(--panel-bg-secondary)',
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            flexShrink: 0,
+            scrollbarWidth: 'thin',
           }}
         >
           <TabButton
@@ -189,7 +194,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           />
           <TabButton
             icon={<Brain size={15} />}
-            label="LLM Providers"
+            label="Providers"
             isActive={activeTab === 'llm_providers'}
             onClick={() => setActiveTab('llm_providers')}
           />
@@ -408,10 +413,10 @@ function TabButton({ icon, label, isActive, onClick }: {
     <button
       onClick={onClick}
       style={{
-        padding: '12px 18px',
+        padding: '11px 12px',
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
+        gap: '6px',
         border: 'none',
         borderBottom: isActive ? '2px solid var(--primary-color)' : '2px solid transparent',
         // Active: primary color on subtle tinted background.
@@ -424,6 +429,7 @@ function TabButton({ icon, label, isActive, onClick }: {
         fontWeight: isActive ? 700 : 500,
         transition: 'background-color 0.15s, color 0.15s',
         whiteSpace: 'nowrap',
+        flexShrink: 0, // don't let tabs shrink and clip their labels
         marginBottom: '-1px', // overlap the container's border-bottom so active tab "connects" to the content
       }}
       onMouseEnter={(e) => {

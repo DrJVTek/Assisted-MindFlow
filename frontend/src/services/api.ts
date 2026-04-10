@@ -41,23 +41,46 @@ const apiClient: AxiosInstance = axios.create({
 });
 
 /**
- * Response interceptor for error handling
+ * Response interceptor for error handling.
+ *
+ * FastAPI returns errors as `{detail: "..."}` in the response body.
+ * Earlier code only looked at `data.message`, which silently dropped
+ * every backend error message and produced generic "Request failed
+ * with status code XXX" errors. This interceptor extracts the real
+ * message so UI components can show actionable details.
  */
 apiClient.interceptors.response.use(
   response => response,
   (error: AxiosError) => {
-    // Log errors for debugging
     console.error('API Error:', {
       message: error.message,
       status: error.response?.status,
       data: error.response?.data,
     });
 
-    // Transform error for consistent handling
-    const errorMessage =
-      (error.response?.data as { message?: string })?.message ||
-      error.message ||
-      'An unknown error occurred';
+    const data = error.response?.data as
+      | { detail?: string | Array<{ msg?: string; loc?: string[] }>; message?: string }
+      | undefined;
+
+    let errorMessage: string = error.message || 'An unknown error occurred';
+
+    if (data) {
+      if (typeof data.detail === 'string') {
+        // Standard FastAPI HTTPException(detail=...) format
+        errorMessage = data.detail;
+      } else if (Array.isArray(data.detail)) {
+        // Pydantic validation error format: [{loc, msg, type}, ...]
+        errorMessage = data.detail
+          .map((d) => {
+            const loc = d.loc ? d.loc.join('.') : '';
+            return loc ? `${loc}: ${d.msg}` : d.msg || '';
+          })
+          .filter(Boolean)
+          .join('; ') || errorMessage;
+      } else if (typeof data.message === 'string') {
+        errorMessage = data.message;
+      }
+    }
 
     return Promise.reject(new Error(errorMessage));
   }

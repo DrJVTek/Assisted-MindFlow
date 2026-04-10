@@ -147,6 +147,44 @@ class Orchestrator:
         return inputs
 
     @staticmethod
+    def _check_required_inputs(
+        node_cls: Any,
+        node_id: UUID,
+        class_type: str,
+        inputs: dict[str, Any],
+    ) -> None:
+        """Raise a clear error if a required INPUT_TYPES field is missing.
+
+        Otherwise the user gets a Python `TypeError: ... missing 1 required
+        positional argument: 'model'` which is not actionable. This helper
+        walks the node's declared required inputs and raises a ValueError
+        with a message pointing at the actual missing config field.
+        """
+        input_types_func = getattr(node_cls, "INPUT_TYPES", None)
+        if not callable(input_types_func):
+            return
+        try:
+            input_types = input_types_func()
+        except Exception:
+            return
+        required = input_types.get("required", {}) or {}
+        missing: list[str] = []
+        for name, spec in required.items():
+            if name in inputs:
+                # Treat empty-string / None as missing for STRING fields
+                val = inputs[name]
+                if val not in ("", None):
+                    continue
+            missing.append(name)
+        if missing:
+            raise ValueError(
+                f"Node {node_id} ({class_type}) is missing required input(s): "
+                f"{', '.join(missing)}. "
+                f"Open the node in the side panel and fill these fields "
+                f"(for LLM nodes, pick a provider first so the model list populates)."
+            )
+
+    @staticmethod
     def _filter_kwargs_for(func: Callable, inputs: dict[str, Any]) -> dict[str, Any]:
         """Drop inputs that the callable can't accept.
 
@@ -311,6 +349,10 @@ class Orchestrator:
                 f"Node class '{node.class_type}' has no function '{func_name}'. "
                 f"Check the plugin's FUNCTION attribute."
             )
+
+        # Validate required inputs first so the user sees a clear message
+        # ("missing input: model") instead of a Python TypeError.
+        self._check_required_inputs(node_cls, node_id, node.class_type or "", inputs)
 
         # Call execute with only the inputs this function actually accepts.
         # The orchestrator populates common keys (text, prompt, provider)
@@ -487,6 +529,9 @@ class Orchestrator:
                 f"Node class '{node.class_type}' declares STREAMING=True "
                 f"but has no stream() method."
             )
+
+        # Same required-input pre-check as batch execute.
+        self._check_required_inputs(node_cls, node_id, node.class_type or "", inputs)
 
         # Stream tokens one by one. Filter inputs to the stream function's
         # signature for the same reason as the batch-execute path.

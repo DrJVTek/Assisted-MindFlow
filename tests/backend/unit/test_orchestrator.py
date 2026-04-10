@@ -69,8 +69,15 @@ class FakeLLMChat:
 
     @classmethod
     def INPUT_TYPES(cls):
+        # Non-empty COMBO options so the orchestrator can auto-fill the
+        # required `model` input during tests. Real llm_chat has an empty
+        # options list and relies on the frontend to inject a model from
+        # the selected provider's available_models.
         return {
-            "required": {"prompt": ("STRING", {}), "model": ("COMBO", {})},
+            "required": {
+                "prompt": ("STRING", {}),
+                "model": ("COMBO", {"options": ["test-model"]}),
+            },
             "optional": {"context": ("CONTEXT", {})},
         }
 

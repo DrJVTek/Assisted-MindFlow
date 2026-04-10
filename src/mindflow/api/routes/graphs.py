@@ -19,7 +19,6 @@ from mindflow.models.node import Node, NodeType, NodeAuthor, NodeStatus, NodeMet
 from mindflow.models.group import Group, GroupKind, GroupMetadata
 from mindflow.models.comment import Comment, CommentTarget
 from mindflow.models.node_version import NodeVersion, TriggerReason
-from mindflow.utils.cascade import get_affected_nodes
 from mindflow.api.routes.providers import _get_registry
 from mindflow.services.version_storage import get_version_storage
 from mindflow.services.graph_service import GraphService
@@ -757,22 +756,6 @@ async def restore_node_version(
     return node
 
 
-class RegenerateCascadeRequest(BaseModel):
-    """Request body for cascade regeneration."""
-    modified_node_id: str = Field(description="UUID of the node that was modified")
-    llm_provider: str = Field(description="LLM provider type (openai, anthropic, ollama, chatgpt_web, gemini)")
-    llm_model: str = Field(description="LLM model identifier")
-
-
-class RegenerateCascadeResponse(BaseModel):
-    """Response for cascade regeneration."""
-    success: bool
-    affected_nodes: List[str]
-    regenerated_count: int
-    errors: List[Dict[str, str]] = Field(default_factory=list)
-    message: str
-
-
 # Group Request/Response Models
 class CreateGroupRequest(BaseModel):
     """Request body for creating a new group."""
@@ -805,169 +788,6 @@ class CreateCommentRequest(BaseModel):
 class UpdateCommentRequest(BaseModel):
     """Request body for updating a comment."""
     content: str = Field(min_length=1, max_length=5000)
-
-
-@router.post("/{graph_id}/regenerate-cascade")
-async def regenerate_cascade(
-    graph_id: str, request: RegenerateCascadeRequest
-) -> RegenerateCascadeResponse:
-    """Regenerate all nodes downstream from a modified node.
-
-    This endpoint implements the cascade regeneration algorithm:
-    1. Find all descendants of the modified node
-    2. Sort them topologically (parents before children)
-    3. For each node, regenerate content using LLM based on parent nodes
-    4. Update node content and timestamp
-
-    Args:
-        graph_id: UUID of the graph
-        request: Cascade regeneration request with modified_node_id and LLM config
-
-    Returns:
-        Response with success status, affected nodes, and any errors
-
-    Raises:
-        HTTPException: 404 if graph or node not found, 400 for validation errors
-    """
-    logger.info(f"POST /api/graphs/{graph_id}/regenerate-cascade - node={request.modified_node_id}")
-
-    _ensure_graph_loaded(graph_id)
-    if graph_id not in _graphs_storage:
-        raise HTTPException(
-            status_code=404, detail=f"Graph with ID {graph_id} not found"
-        )
-
-    graph = _graphs_storage[graph_id]
-
-    # Validate modified node ID
-    try:
-        modified_node_uuid = UUID(request.modified_node_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid UUID format: {request.modified_node_id}"
-        )
-
-    if modified_node_uuid not in graph.nodes:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Modified node {request.modified_node_id} not found in graph",
-        )
-
-    # Get affected nodes in topological order
-    try:
-        affected_node_ids = get_affected_nodes(graph, modified_node_uuid)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Error computing cascade: {str(e)}")
-
-    if not affected_node_ids:
-        logger.info(f"No descendants found for node {request.modified_node_id}")
-        return RegenerateCascadeResponse(
-            success=True,
-            affected_nodes=[],
-            regenerated_count=0,
-            message="No downstream nodes to regenerate",
-        )
-
-    logger.info(
-        f"Found {len(affected_node_ids)} nodes to regenerate in cascade order"
-    )
-
-    # Resolve provider from registry
-    registry = _get_registry()
-    provider = None
-    for p_config in registry.list_providers():
-        if p_config.type.value == request.llm_provider:
-            provider = registry.get_provider_instance(str(p_config.id))
-            if provider:
-                break
-    if provider is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Provider '{request.llm_provider}' not configured. Add it in Provider Settings.",
-        )
-
-    # Regenerate each node in order
-    regenerated_count = 0
-    errors = []
-
-    for node_uuid in affected_node_ids:
-        try:
-            node = graph.nodes[node_uuid]
-
-            # Get parent nodes for context
-            parent_nodes = [
-                graph.nodes[parent_uuid]
-                for parent_uuid in node.parents
-                if parent_uuid in graph.nodes
-            ]
-
-            # Store previous content
-            previous_content = node.content
-
-            # Build context from parents and generate
-            context_parts = []
-            for i, parent in enumerate(parent_nodes, 1):
-                context_parts.append(f"Parent Node {i} ({parent.type}):\n{parent.content}\n")
-            context_text = "\n".join(context_parts)
-            prompt = f"Context:\n{context_text}\n\n"
-            if previous_content:
-                prompt += f"Previous Content:\n{previous_content}\n\n"
-            prompt += f"Generate content for a {node.type} node based on the context."
-
-            response = await provider.generate(
-                prompt=prompt,
-                model=request.llm_model,
-            )
-            new_content = response.content
-
-            # Update node
-            node.content = new_content
-            node.update_timestamp()
-
-            # Create version for cascade regeneration
-            version_storage = get_version_storage()
-            version_storage.create_version(
-                node_id=node_uuid,
-                content=new_content,
-                trigger_reason="parent_cascade",
-                llm_metadata={
-                    "provider": request.llm_provider,
-                    "model": request.llm_model,
-                    "previous_content": previous_content,
-                },
-            )
-
-            regenerated_count += 1
-            logger.info(f"Regenerated node {node_uuid} ({node.type})")
-
-        except Exception as e:
-            error_msg = f"Error regenerating node {node_uuid}: {str(e)}"
-            logger.error(error_msg)
-            errors.append({"node_id": str(node_uuid), "error": str(e)})
-
-    # Update graph timestamp
-    from datetime import UTC, datetime
-    graph.meta.updated_at = datetime.now(UTC)
-    _persist_graph(graph_id)
-
-    success = regenerated_count > 0 and len(errors) == 0
-    message = (
-        f"Successfully regenerated {regenerated_count} nodes"
-        if success
-        else f"Regenerated {regenerated_count} nodes with {len(errors)} errors"
-    )
-
-    logger.info(
-        f"Cascade regeneration complete: {regenerated_count} nodes, {len(errors)} errors"
-    )
-
-    return RegenerateCascadeResponse(
-        success=success,
-        affected_nodes=[str(nid) for nid in affected_node_ids],
-        regenerated_count=regenerated_count,
-        errors=errors,
-        message=message,
-    )
 
 
 # ============================================================================

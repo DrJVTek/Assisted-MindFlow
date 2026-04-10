@@ -214,31 +214,6 @@ export const api = {
     await apiClient.delete(`/graphs/${graphId}/nodes/${nodeId}`);
   },
 
-  /**
-   * Regenerate cascade from a modified node
-   */
-  regenerateCascade: async (
-    graphId: string,
-    modifiedNodeId: string,
-    options?: {
-      llmProvider?: string;
-      llmModel?: string;
-    }
-  ): Promise<{
-    success: boolean;
-    affected_nodes: string[];
-    regenerated_count: number;
-    errors: Array<{ node_id: string; error: string }>;
-    message: string;
-  }> => {
-    const response = await apiClient.post(`/graphs/${graphId}/regenerate-cascade`, {
-      modified_node_id: modifiedNodeId,
-      llm_provider: options?.llmProvider || 'mock',
-      llm_model: options?.llmModel || 'mock-model',
-    });
-    return response.data;
-  },
-
   // ============================================================================
   // GROUP METHODS
   // ============================================================================

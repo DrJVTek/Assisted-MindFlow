@@ -42,14 +42,11 @@ import { SettingsPanel } from './SettingsPanel';
 import { ContextMenu } from './ContextMenu';
 import { NodeCreator } from './NodeCreator';
 import { NodeEditor } from './NodeEditor';
-import { CascadeRegenDialog } from './CascadeRegenDialog';
 import { VersionHistory } from './VersionHistory';
 import { DebateControls } from './DebateControls';
 import { ImportConversationDialog } from './ImportConversationDialog';
 import { CanvasNavigator } from '../features/canvas/components/CanvasNavigator';
 import { api } from '../services/api';
-import { useCascadeRegen } from '../features/llm/hooks/useCascadeRegen';
-import { getAffectedNodes } from '../features/llm/utils/cascade';
 
 // Type for context menu (defined here to avoid import issues)
 type ContextMenuType = 'canvas' | 'node' | 'group';
@@ -112,11 +109,6 @@ function CanvasInner() {
   // Node editor state
   const [nodeEditorOpen, setNodeEditorOpen] = useState(false);
   const [nodeBeingEdited, setNodeBeingEdited] = useState<string | null>(null);
-
-  // Cascade regeneration state
-  const [cascadeDialogOpen, setCascadeDialogOpen] = useState(false);
-  const [pendingCascadeNodeId, setPendingCascadeNodeId] = useState<string | null>(null);
-  const { isRegenerating, regenerateCascade } = useCascadeRegen();
 
   // Version history state
   const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
@@ -749,50 +741,17 @@ function CanvasInner() {
 
         console.log('Node updated successfully:', updatedNode);
 
-        // Check if this node has descendants that need regeneration
-        if (graphData) {
-          const affectedNodes = getAffectedNodes(graphData, nodeId);
-          if (affectedNodes.length > 0) {
-            // Show cascade dialog to confirm regeneration
-            setPendingCascadeNodeId(nodeId);
-            setCascadeDialogOpen(true);
-            return; // Don't reload yet, wait for cascade dialog
-          }
-        }
-
-        // No descendants - just reload
+        // Refresh to pick up any backend-side changes (timestamps, etc.).
+        // If the user wants to propagate the change to descendants, they
+        // click Generate on the terminal node they care about — the
+        // orchestrator will re-execute all ancestors in topological order.
         refreshGraph();
       } catch (error) {
-        console.error('Error updating node:', error);
         console.error('Error updating node:', error);
       }
     },
     [graphId, graphData, refreshGraph]
   );
-
-  // Handle cascade regeneration confirmation
-  const handleConfirmCascade = useCallback(async () => {
-    if (!pendingCascadeNodeId || !graphId) return;
-
-    try {
-      const result = await regenerateCascade(graphId, pendingCascadeNodeId);
-
-      setCascadeDialogOpen(false);
-      setPendingCascadeNodeId(null);
-      refreshGraph();
-    } catch (error) {
-      console.error('Error in cascade regeneration:', error);
-      setCascadeDialogOpen(false);
-      setPendingCascadeNodeId(null);
-    }
-  }, [graphId, pendingCascadeNodeId, regenerateCascade, refreshGraph]);
-
-  // Handle cascade cancellation
-  const handleCancelCascade = useCallback(() => {
-    setCascadeDialogOpen(false);
-    setPendingCascadeNodeId(null);
-    refreshGraph();
-  }, [refreshGraph]);
 
   // Handle NodeEditor save
   const handleNodeEditorSave = useCallback(async (nodeId: string, updates: {
@@ -1338,17 +1297,6 @@ function CanvasInner() {
               setNodeBeingEdited(null);
             }}
             onSave={handleNodeEditorSave}
-          />
-        )}
-
-        {/* Cascade Regeneration Dialog */}
-        {cascadeDialogOpen && pendingCascadeNodeId && graphData && (
-          <CascadeRegenDialog
-            graph={graphData}
-            modifiedNodeId={pendingCascadeNodeId}
-            onConfirm={handleConfirmCascade}
-            onCancel={handleCancelCascade}
-            isRegenerating={isRegenerating}
           />
         )}
 

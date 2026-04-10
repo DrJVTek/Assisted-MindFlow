@@ -229,78 +229,43 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
       }}
     >
       {/* ── Named Input Handles (left) ─────────────────────────── */}
+      {/* Port NAMES are rendered in the body below (see "Port labels row"),
+          not next to the handles — adding labels next to the handles here
+          created a visual duplication. Only the connection handles live
+          on the border. */}
       {allInputPorts.map((port, i) => (
-        <React.Fragment key={`in-${port.name}`}>
-          <Handle
-            type="target"
-            position={Position.Left}
-            id={port.name}
-            style={{
-              top: getPortY(i),
-              background: port.color,
-              width: 10,
-              height: 10,
-              border: '2px solid #1E1E2E',
-              left: -5,
-            }}
-          />
-          <div
-            style={{
-              position: 'absolute',
-              top: getPortY(i) - 6,
-              left: 6,
-              fontSize: 9,
-              color: '#B0B8C4',
-              lineHeight: '12px',
-              pointerEvents: 'none',
-              maxWidth: 80,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={`${port.name} (${port.type})`}
-          >
-            {port.name}
-          </div>
-        </React.Fragment>
+        <Handle
+          key={`in-${port.name}`}
+          type="target"
+          position={Position.Left}
+          id={port.name}
+          style={{
+            top: getPortY(i),
+            background: port.color,
+            width: 10,
+            height: 10,
+            border: '2px solid #1E1E2E',
+            left: -5,
+          }}
+        />
       ))}
 
       {/* ── Named Output Handles (right) ───────────────────────── */}
       {outputPorts.map((port, i) => (
-        <React.Fragment key={`out-${port.name}`}>
-          <Handle
-            type="source"
-            position={Position.Right}
-            id={port.name}
-            style={{
-              top: getPortY(i),
-              background: port.color,
-              width: 10,
-              height: 10,
-              border: '2px solid #1E1E2E',
-              right: -5,
-            }}
-          />
-          <div
-            style={{
-              position: 'absolute',
-              top: getPortY(i) - 6,
-              right: 6,
-              fontSize: 9,
-              color: '#B0B8C4',
-              lineHeight: '12px',
-              pointerEvents: 'none',
-              maxWidth: 80,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              textAlign: 'right',
-            }}
-            title={`${port.name} (${port.type})`}
-          >
-            {port.name}
-          </div>
-        </React.Fragment>
+        <Handle
+          key={`out-${port.name}`}
+          type="source"
+          position={Position.Right}
+          id={port.name}
+          style={{
+            top: getPortY(i),
+            background: port.color,
+            width: 10,
+            height: 10,
+            border: '2px solid #1E1E2E',
+            right: -5,
+          }}
+        />
       ))}
 
       {/* No fallback __default handles — if plugin metadata hasn't loaded,

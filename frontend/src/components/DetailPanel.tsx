@@ -83,7 +83,6 @@ export function DetailPanel({
   onRefreshGraph,
 }: DetailPanelProps) {
   const [content, setContent] = useState(node.content);
-  const [showSettings, setShowSettings] = useState(false);
   const [autoCreatedChildId, setAutoCreatedChildId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevLlmStatusRef = useRef<string | null>(null);
@@ -92,6 +91,21 @@ export function DetailPanel({
   // Node type info (must come before provider resolution)
   const classType = node.class_type || node.type;
   const nodeTypeDef = useNodeTypesStore((s) => s.nodeTypes[classType]);
+
+  // Node settings drawer — auto-open for nodes that NEED configuration
+  // (currently: any node declaring a provider_id credential). Otherwise
+  // the user has no idea the provider dropdown exists. Opens on every
+  // node switch so the drawer state follows the selected node.
+  const needsProviderConfig = Boolean(
+    nodeTypeDef?.inputs?.credentials && 'provider_id' in (nodeTypeDef.inputs.credentials || {})
+  );
+  const [showSettings, setShowSettings] = useState(false);
+  useEffect(() => {
+    // On node change, reset drawer visibility based on whether the new
+    // node needs provider configuration. User can still toggle manually
+    // but the initial state is driven by the node type.
+    setShowSettings(needsProviderConfig);
+  }, [node.id, needsProviderConfig]);
   const pluginProviderType = useNodeTypesStore((s) => s.getProviderType(classType));
   const headerColor = nodeTypeDef?.ui?.color || '#546E7A';
   const displayName = nodeTypeDef?.display_name || (node.type || 'node').replace(/_/g, ' ');
@@ -384,6 +398,34 @@ export function DetailPanel({
 
       {/* ── Scrollable content area ────────────────────────────── */}
       <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+
+        {/* ── Provider-missing warning ──────────────────────────
+            Shown above the prompt for any node that needs a provider but
+            doesn't have one. Without this, the user sees a generic "missing
+            input: model" error at the bottom of the response area after
+            clicking Generate — this banner tells them upfront. */}
+        {needsProviderConfig && !providerId && (
+          <div style={{
+            margin: '0 16px 12px',
+            padding: '10px 12px',
+            borderRadius: '6px',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            color: '#F59E0B',
+            fontSize: '12px',
+            lineHeight: 1.4,
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '8px',
+          }}>
+            <span style={{ fontSize: '14px', lineHeight: '14px' }}>⚠</span>
+            <span>
+              <strong>No provider selected.</strong> Pick one in the Node Settings
+              dropdown above before clicking Generate, or the request will fail
+              with "missing model".
+            </span>
+          </div>
+        )}
 
         {/* ── Parent context (previous turn) ─────────────────── */}
         {parentContext && parentContext.response && (

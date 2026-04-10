@@ -126,8 +126,12 @@ function CanvasInner() {
   // Multi-selection state
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
 
-  // Connection validation (Phase 6: type-safe connections)
-  const { isValidConnection } = useConnectionValidator();
+  // Connection validation — passes the current React Flow node list to the
+  // validator so it can resolve source/target class_types and run the full
+  // type compatibility matrix (STRING→CONTEXT, INT→FLOAT, etc.).
+  const { isValidConnection } = useConnectionValidator(
+    () => reactFlowInstance.getNodes()
+  );
 
   // Load canvases on mount
   useEffect(() => {
@@ -277,11 +281,9 @@ function CanvasInner() {
     []
   );
 
-  // Handle new connection between nodes.
-  // Requires named handles (ComfyUI-style ports). If nodeTypesStore hasn't
-  // loaded yet, the handles will be __default_in/__default_out — in that
-  // case we refuse the connection and log an error rather than creating a
-  // half-typed edge that can't be cleanly deleted later.
+  // Handle new connection between nodes. Connections must always be made
+  // via named ComfyUI-style ports — a node without plugin metadata has no
+  // visible handles at all, so we should never see a null handle here.
   const onConnect = useCallback(
     async (connection: Connection) => {
       if (!graphId || !connection.source || !connection.target) return;
@@ -289,14 +291,9 @@ function CanvasInner() {
       const sourceHandle = connection.sourceHandle;
       const targetHandle = connection.targetHandle;
 
-      if (
-        !sourceHandle ||
-        !targetHandle ||
-        sourceHandle.startsWith('__default') ||
-        targetHandle.startsWith('__default')
-      ) {
+      if (!sourceHandle || !targetHandle) {
         console.error(
-          '[Canvas] Refusing connection with default handles — node metadata not yet loaded. Try again in a moment.'
+          '[Canvas] Refusing connection with missing handles — this should not happen with a properly loaded node type registry.'
         );
         return;
       }
@@ -336,12 +333,9 @@ function CanvasInner() {
       if (!graphId) return;
 
       for (const edge of deletedEdges) {
-        if (!edge.targetHandle || edge.targetHandle.startsWith('__default')) {
-          // Legacy edge with no named handle — can't be deleted via the
-          // connections endpoint. Log and skip; a graph refresh will re-add
-          // it from parents/children, signalling the inconsistency.
+        if (!edge.targetHandle) {
           console.warn(
-            `[Canvas] Cannot delete edge ${edge.id}: missing named targetHandle. This edge was created before the connections model existed.`
+            `[Canvas] Cannot delete edge ${edge.id}: missing named targetHandle.`
           );
           continue;
         }
@@ -1219,6 +1213,7 @@ function CanvasInner() {
               onUpdate={handleUpdateNode}
               onCreateChild={handleCreateChildFromPanel}
               onSelectNode={(nodeId) => selectNode(nodeId)}
+              onRefreshGraph={refreshGraph}
             />
           </Suspense>
         )}

@@ -58,19 +58,10 @@ interface PortInfo {
 
 const WIDGET_TYPES = new Set(['COMBO', 'INT', 'FLOAT', 'BOOLEAN', 'SECRET']);
 
-const TYPE_COLORS: Record<string, string> = {
-  STRING: '#8BC34A',
-  CONTEXT: '#00BCD4',
-  INT: '#2196F3',
-  FLOAT: '#FF9800',
-  BOOLEAN: '#9C27B0',
-  COMBO: '#607D8B',
-  SECRET: '#F44336',
-  USAGE: '#795548',
-  TOOL_RESULT: '#E91E63',
-  EMBEDDING: '#3F51B5',
-  DOCUMENT: '#FF5722',
-};
+// Fallback color used only when the type system store hasn't loaded yet.
+// Real type colors come from /api/node-types → typeDefinitions via
+// nodeTypesStore.getTypeColor().
+const FALLBACK_PORT_COLOR = '#90A4AE';
 
 function extractTemplateVars(content: string): string[] {
   const matches = content.match(/\{\{(\w+)\}\}/g);
@@ -139,7 +130,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
           inputs.push({
             name: inputName,
             type: inputType,
-            color: getTypeColor(inputType) || TYPE_COLORS[inputType] || '#90A4AE',
+            color: getTypeColor(inputType) || FALLBACK_PORT_COLOR,
           });
         }
       }
@@ -150,12 +141,16 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
         outputs.push({
           name: returnNames[i] || `output_${i}`,
           type: returnTypes[i],
-          color: getTypeColor(returnTypes[i]) || TYPE_COLORS[returnTypes[i]] || '#90A4AE',
+          color: getTypeColor(returnTypes[i]) || FALLBACK_PORT_COLOR,
         });
       }
     } else {
-      inputs.push({ name: 'input', type: 'STRING', color: TYPE_COLORS.STRING });
-      outputs.push({ name: 'output', type: 'STRING', color: TYPE_COLORS.STRING });
+      // No plugin metadata loaded yet — render a single generic port.
+      // This path should be rare because Canvas waits for nodeTypesStore
+      // before allowing connections to be made.
+      const stringColor = getTypeColor('STRING') || FALLBACK_PORT_COLOR;
+      inputs.push({ name: 'input', type: 'STRING', color: stringColor });
+      outputs.push({ name: 'output', type: 'STRING', color: stringColor });
     }
 
     return { inputPorts: inputs, outputPorts: outputs, headerColor: color, displayName: name };
@@ -216,7 +211,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
         borderWidth: selected ? 2 : 1,
         borderStyle: 'solid',
         borderRadius: '6px',
-        width: 220,
+        width: 260,
         minHeight: nodeMinHeight,
         opacity,
         boxShadow: selected
@@ -235,57 +230,82 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     >
       {/* ── Named Input Handles (left) ─────────────────────────── */}
       {allInputPorts.map((port, i) => (
-        <Handle
-          key={`in-${port.name}`}
-          type="target"
-          position={Position.Left}
-          id={port.name}
-          style={{
-            top: getPortY(i),
-            background: port.color,
-            width: 8,
-            height: 8,
-            border: '2px solid #1E1E2E',
-            left: -4,
-          }}
-        />
+        <React.Fragment key={`in-${port.name}`}>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id={port.name}
+            style={{
+              top: getPortY(i),
+              background: port.color,
+              width: 10,
+              height: 10,
+              border: '2px solid #1E1E2E',
+              left: -5,
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              top: getPortY(i) - 6,
+              left: 6,
+              fontSize: 9,
+              color: '#B0B8C4',
+              lineHeight: '12px',
+              pointerEvents: 'none',
+              maxWidth: 80,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={`${port.name} (${port.type})`}
+          >
+            {port.name}
+          </div>
+        </React.Fragment>
       ))}
 
       {/* ── Named Output Handles (right) ───────────────────────── */}
       {outputPorts.map((port, i) => (
-        <Handle
-          key={`out-${port.name}`}
-          type="source"
-          position={Position.Right}
-          id={port.name}
-          style={{
-            top: getPortY(i),
-            background: port.color,
-            width: 8,
-            height: 8,
-            border: '2px solid #1E1E2E',
-            right: -4,
-          }}
-        />
+        <React.Fragment key={`out-${port.name}`}>
+          <Handle
+            type="source"
+            position={Position.Right}
+            id={port.name}
+            style={{
+              top: getPortY(i),
+              background: port.color,
+              width: 10,
+              height: 10,
+              border: '2px solid #1E1E2E',
+              right: -5,
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              top: getPortY(i) - 6,
+              right: 6,
+              fontSize: 9,
+              color: '#B0B8C4',
+              lineHeight: '12px',
+              pointerEvents: 'none',
+              maxWidth: 80,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              textAlign: 'right',
+            }}
+            title={`${port.name} (${port.type})`}
+          >
+            {port.name}
+          </div>
+        </React.Fragment>
       ))}
 
-      {/* Fallback handles for nodes without plugin metadata (legacy/migration) */}
-      {allInputPorts.length === 0 && (
-        <Handle
-          type="target"
-          position={Position.Top}
-          id="__default_in"
-          style={{ background: '#546E7A', width: 6, height: 6, border: '1px solid #1E1E2E', opacity: 0.5 }}
-        />
-      )}
-      {outputPorts.length === 0 && (
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          id="__default_out"
-          style={{ background: '#546E7A', width: 6, height: 6, border: '1px solid #1E1E2E', opacity: 0.5 }}
-        />
-      )}
+      {/* No fallback __default handles — if plugin metadata hasn't loaded,
+          the node simply has no connectable ports. This prevents the
+          creation of half-typed edges that can't be cleanly deleted. */}
 
       {/* ── Title Bar ──────────────────────────────────────────── */}
       <div

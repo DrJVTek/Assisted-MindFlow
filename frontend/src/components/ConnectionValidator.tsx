@@ -11,7 +11,7 @@
  */
 
 import { useCallback } from 'react';
-import type { Connection } from 'reactflow';
+import type { Connection, Node as ReactFlowNode } from 'reactflow';
 import { useNodeTypesStore } from '../stores/nodeTypesStore';
 
 /**
@@ -54,7 +54,7 @@ export function isImplicitConversion(sourceType: string, targetType: string): bo
   return IMPLICIT_CONVERSIONS.has(`${sourceType}->${targetType}`);
 }
 
-export function useConnectionValidator() {
+export function useConnectionValidator(getNodes?: () => ReactFlowNode[]) {
   const nodeTypes = useNodeTypesStore((s) => s.nodeTypes);
   const typeDefinitions = useNodeTypesStore((s) => s.typeDefinitions);
   const isLoaded = useNodeTypesStore((s) => s.isLoaded);
@@ -93,18 +93,50 @@ export function useConnectionValidator() {
   );
 
   /**
-   * Validate a connection between two nodes.
-   * Used as ReactFlow's isValidConnection callback.
+   * Validate a connection between two nodes using the full type compatibility
+   * matrix. Used as ReactFlow's isValidConnection callback.
+   *
+   * Resolves the source node's output type and the target node's input type
+   * by class_type + handle name, then checks compatibility.
    */
   const isValidConnection = useCallback(
     (connection: Connection): boolean => {
-      if (!isLoaded) return true; // Allow if type data not loaded yet
       if (!connection.source || !connection.target) return false;
       if (connection.source === connection.target) return false; // No self-loops
+      if (!connection.sourceHandle || !connection.targetHandle) return false;
 
-      return true;
+      // If type data isn't loaded yet OR we can't access the node list,
+      // fall back to structural validation only (non-null handles, no self-loops).
+      if (!isLoaded || !getNodes) return true;
+
+      const nodes = getNodes();
+      const sourceNode = nodes.find((n) => n.id === connection.source);
+      const targetNode = nodes.find((n) => n.id === connection.target);
+      if (!sourceNode || !targetNode) return true;
+
+      const sourceClassType: string | undefined =
+        sourceNode.data?.class_type || sourceNode.data?.type;
+      const targetClassType: string | undefined =
+        targetNode.data?.class_type || targetNode.data?.type;
+      if (!sourceClassType || !targetClassType) return true;
+
+      // Resolve output type from source node's return_types + sourceHandle
+      const sourceInfo = nodeTypes[sourceClassType];
+      if (!sourceInfo?.return_types || !sourceInfo.return_names) return true;
+      const outputIdx = sourceInfo.return_names.indexOf(connection.sourceHandle);
+      if (outputIdx < 0) return true;
+      const sourceType = sourceInfo.return_types[outputIdx];
+
+      // Resolve input type from target node's INPUT_TYPES + targetHandle
+      const targetType = getNodeInputType(targetClassType, connection.targetHandle);
+      if (!targetType) {
+        // Template var inputs (extracted from {{var}}) are always STRING
+        return isTypeCompatible(sourceType || 'STRING', 'STRING');
+      }
+
+      return isTypeCompatible(sourceType, targetType);
     },
-    [isLoaded]
+    [isLoaded, nodeTypes, getNodes, getNodeInputType]
   );
 
   /**

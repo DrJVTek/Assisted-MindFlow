@@ -50,6 +50,8 @@ interface DetailPanelProps {
   onCreateChild?: (parentId: string) => void;
   /** Called to select a different node */
   onSelectNode?: (nodeId: string) => void;
+  /** Refresh graph data after a field that affects derived state (e.g. provider_id) is saved */
+  onRefreshGraph?: () => void;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -78,6 +80,7 @@ export function DetailPanel({
   onUpdate,
   onCreateChild,
   onSelectNode,
+  onRefreshGraph,
 }: DetailPanelProps) {
   const [content, setContent] = useState(node.content);
   const [showSettings, setShowSettings] = useState(false);
@@ -95,12 +98,11 @@ export function DetailPanel({
 
   // Provider info — resolve from explicit provider_id, or auto-detect from plugin category
   const providerId = node.provider_id || null;
-  const provider = useProviderStore((s) => {
-    // Explicit provider_id takes priority
-    if (providerId) return s.providers.find((p) => p.id === providerId);
-    // Auto-resolve from plugin category (e.g., class_type "chatgpt_web_chat" → provider type "chatgpt_web")
-    if (pluginProviderType) return s.providers.find((p) => p.type === pluginProviderType);
-    return undefined;
+  const allProviders = useProviderStore((s) => s.providers);
+  const provider = allProviders.find((p) => {
+    if (providerId) return p.id === providerId;
+    if (pluginProviderType) return p.type === pluginProviderType;
+    return false;
   });
 
   // Graph execution engine
@@ -304,9 +306,46 @@ export function DetailPanel({
             <span>Status: {(node.meta?.status || 'draft')}</span>
             <span>Author: {node.author}</span>
           </div>
-          {provider && (
-            <div style={{ fontSize: '12px', color: '#9CA3AF' }}>
-              Provider: {provider.name} ({PROVIDER_TYPE_LABELS[provider.type]})
+          {/* Provider picker — shown for any node that uses a `provider_id`
+              credential in its plugin INPUT_TYPES (currently: LLMChatNode).
+              The list is filtered to providers compatible with this node's
+              declared credential requirements. */}
+          {nodeTypeDef?.inputs?.credentials && 'provider_id' in (nodeTypeDef.inputs.credentials || {}) && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--node-text)' }}>
+                Provider
+              </label>
+              <select
+                value={providerId || ''}
+                onChange={(e) => {
+                  if (!graphId) return;
+                  const newProviderId = e.target.value || null;
+                  api.updateNode(graphId, node.id, { provider_id: newProviderId } as any)
+                    .then(() => onRefreshGraph?.())
+                    .catch(err => console.error('Failed to update provider:', err));
+                }}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  fontSize: '13px',
+                  borderRadius: '4px',
+                  border: '1px solid var(--panel-border, #ccc)',
+                  backgroundColor: 'var(--panel-bg, #fff)',
+                  color: 'var(--node-text, #333)',
+                }}
+              >
+                <option value="">— Select a provider —</option>
+                {allProviders.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({PROVIDER_TYPE_LABELS[p.type] || p.type})
+                  </option>
+                ))}
+              </select>
+              {provider && provider.available_models.length === 0 && (
+                <div style={{ fontSize: '11px', color: '#F59E0B' }}>
+                  No models available. Validate the provider in Settings to fetch its model list.
+                </div>
+              )}
             </div>
           )}
           {/* Dynamic input widgets from plugin metadata (COMBO, INT, FLOAT, BOOLEAN — not STRING which is the prompt) */}
@@ -321,6 +360,14 @@ export function DetailPanel({
                   .catch(err => console.error('Failed to save input:', err));
               }}
               excludeTypes={['STRING']}
+              // Runtime model list comes from the selected provider. This is
+              // what makes the generic LLMChatNode usable for any provider
+              // without hardcoding model lists in the plugin.
+              dynamicOptions={
+                provider?.available_models
+                  ? { model: provider.available_models }
+                  : undefined
+              }
             />
           )}
         </div>

@@ -21,6 +21,13 @@ interface DynamicNodeViewProps {
   readOnly?: boolean;
   /** Exclude inputs of these types (e.g., ['STRING'] to skip prompt fields handled elsewhere) */
   excludeTypes?: string[];
+  /**
+   * Runtime override for COMBO options keyed by input name. Used for fields
+   * whose options aren't known at plugin-definition time — e.g., the `model`
+   * input on LLMChatNode, whose list comes from the selected provider's
+   * available_models at runtime.
+   */
+  dynamicOptions?: Record<string, string[]>;
 }
 
 function resolveInputSpec(raw: InputSpec | [string, ...unknown[]]): {
@@ -42,6 +49,7 @@ function InputWidget({
   value,
   onChange,
   readOnly,
+  dynamicOptions,
 }: {
   name: string;
   type: string;
@@ -49,6 +57,7 @@ function InputWidget({
   value: unknown;
   onChange: (value: unknown) => void;
   readOnly?: boolean;
+  dynamicOptions?: string[];
 }) {
   const baseStyle: React.CSSProperties = {
     width: '100%',
@@ -123,19 +132,34 @@ function InputWidget({
         </label>
       );
 
-    case 'COMBO':
+    case 'COMBO': {
+      // Runtime-provided options (e.g., models from the selected provider)
+      // take precedence over the plugin-declared static options.
+      const options = dynamicOptions && dynamicOptions.length > 0
+        ? dynamicOptions
+        : (spec.options ?? []);
+      const currentValue = (value as string) ?? spec.default ?? '';
       return (
         <select
-          value={(value as string) ?? spec.default ?? ''}
+          value={currentValue}
           onChange={e => onChange(e.target.value)}
-          disabled={readOnly}
+          disabled={readOnly || options.length === 0}
           style={baseStyle}
         >
-          {(spec.options ?? []).map(opt => (
+          {options.length === 0 && (
+            <option value="">— No options available —</option>
+          )}
+          {/* If the current value isn't in the options list, show it anyway
+              so the user sees what's saved on the node. */}
+          {currentValue && !options.includes(currentValue) && (
+            <option value={currentValue}>{currentValue} (saved)</option>
+          )}
+          {options.map(opt => (
             <option key={opt} value={opt}>{opt}</option>
           ))}
         </select>
       );
+    }
 
     case 'SECRET':
       return (
@@ -163,7 +187,14 @@ function InputWidget({
   }
 }
 
-export function DynamicNodeView({ nodeTypeDef, values, onChange, readOnly, excludeTypes }: DynamicNodeViewProps) {
+export function DynamicNodeView({
+  nodeTypeDef,
+  values,
+  onChange,
+  readOnly,
+  excludeTypes,
+  dynamicOptions,
+}: DynamicNodeViewProps) {
   const { inputs } = nodeTypeDef;
   const excludeSet = new Set(excludeTypes || []);
 
@@ -202,6 +233,7 @@ export function DynamicNodeView({ nodeTypeDef, values, onChange, readOnly, exclu
                 value={values[name]}
                 onChange={v => onChange(name, v)}
                 readOnly={readOnly}
+                dynamicOptions={dynamicOptions?.[name]}
               />
             </div>
           );

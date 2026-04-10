@@ -31,6 +31,7 @@ import 'reactflow/dist/style.css';
 import { useCanvasStore } from '../stores/canvasStore';
 import { useNodeTypesStore } from '../stores/nodeTypesStore';
 import { useProviderStore } from '../stores/providerStore';
+import { useExecutionStore } from '../stores/executionStore';
 import { useGraphData } from '../features/canvas/hooks/useGraphData';
 import { useViewport } from '../features/canvas/hooks/useViewport';
 import { useLayout } from '../features/canvas/hooks/useLayout';
@@ -130,6 +131,17 @@ function CanvasInner() {
 
   // Multi-selection state
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
+
+  // Edge hover tooltip — shows the text value flowing through a connection
+  // by reading nodeResults from the shared executionStore. Populated only
+  // when the user hovers an edge whose source has run at least once.
+  const [edgeTooltip, setEdgeTooltip] = useState<{
+    x: number;
+    y: number;
+    title: string;
+    body: string;
+  } | null>(null);
+  const nodeResultsForHover = useExecutionStore((s) => s.nodeResults);
 
   // Connection validation — passes the current React Flow node list to the
   // validator so it can resolve source/target class_types and run the full
@@ -339,6 +351,68 @@ function CanvasInner() {
     },
     [graphId]
   );
+
+  // Edge hover — read the value flowing through the connection from the
+  // shared executionStore and surface it in a floating tooltip. Useful for
+  // "what does this edge actually carry?" debugging without opening the
+  // DetailPanel. Only shows meaningful data after at least one execution
+  // has populated nodeResults for the source node.
+  const formatEdgeValue = useCallback(
+    (edge: { source: string; sourceHandle?: string | null; targetHandle?: string | null }) => {
+      const handle = edge.sourceHandle || 'text';
+      const result = nodeResultsForHover[edge.source];
+      if (!result) {
+        return {
+          title: `${handle} → ${edge.targetHandle || '?'}`,
+          body: '(no data yet — execute a downstream node to populate)',
+        };
+      }
+      // Prefer the named output, then accumulated streaming tokens, then any other output
+      const outputs = result.outputs as Record<string, unknown> | undefined;
+      let raw: unknown =
+        outputs?.[handle] ??
+        result.tokens ??
+        outputs?.text ??
+        outputs?.response ??
+        outputs?.output;
+      if (raw === undefined || raw === null) {
+        if (result.error) {
+          return {
+            title: `${handle} → ${edge.targetHandle || '?'} (error)`,
+            body: result.error,
+          };
+        }
+        return {
+          title: `${handle} → ${edge.targetHandle || '?'}`,
+          body: '(empty)',
+        };
+      }
+      const asString = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+      const truncated = asString.length > 800 ? asString.slice(0, 800) + '…' : asString;
+      return {
+        title: `${handle} → ${edge.targetHandle || '?'}  (${asString.length} chars)`,
+        body: truncated,
+      };
+    },
+    [nodeResultsForHover]
+  );
+
+  const onEdgeMouseEnter = useCallback(
+    (event: React.MouseEvent, edge: { source: string; sourceHandle?: string | null; targetHandle?: string | null }) => {
+      const { title, body } = formatEdgeValue(edge);
+      setEdgeTooltip({ x: event.clientX + 12, y: event.clientY + 12, title, body });
+    },
+    [formatEdgeValue]
+  );
+
+  const onEdgeMouseMove = useCallback(
+    (event: React.MouseEvent) => {
+      setEdgeTooltip((prev) => (prev ? { ...prev, x: event.clientX + 12, y: event.clientY + 12 } : prev));
+    },
+    []
+  );
+
+  const onEdgeMouseLeave = useCallback(() => setEdgeTooltip(null), []);
 
   // Handle edge deletion — user pressed Delete/Backspace on a selected edge,
   // or edges were removed programmatically. Calls the backend DELETE endpoint
@@ -1069,6 +1143,9 @@ function CanvasInner() {
           nodesConnectable={true}   // Enable edge creation with type validation
           onConnect={onConnect}
           onEdgesDelete={onEdgesDelete}
+          onEdgeMouseEnter={onEdgeMouseEnter}
+          onEdgeMouseMove={onEdgeMouseMove}
+          onEdgeMouseLeave={onEdgeMouseLeave}
           isValidConnection={isValidConnection}
           elementsSelectable={true} // Allow selecting elements
           selectNodesOnDrag={false} // Don't select on drag (allows node movement)
@@ -1204,6 +1281,47 @@ function CanvasInner() {
             </button>
           </Panel>
         </ReactFlow>
+
+        {/* Edge hover tooltip — shows the current value flowing through
+            the connection. Rendered as a fixed-position div that follows
+            the mouse so it never gets clipped by the canvas viewport. */}
+        {edgeTooltip && (
+          <div
+            style={{
+              position: 'fixed',
+              left: edgeTooltip.x,
+              top: edgeTooltip.y,
+              maxWidth: '420px',
+              maxHeight: '280px',
+              overflow: 'auto',
+              padding: '8px 10px',
+              borderRadius: '6px',
+              background: 'rgba(20, 22, 30, 0.96)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: '#E5E7EB',
+              fontSize: '11px',
+              fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+              lineHeight: 1.45,
+              pointerEvents: 'none',
+              zIndex: 10000,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            <div style={{
+              fontSize: '10px',
+              fontWeight: 600,
+              color: '#9CA3AF',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              marginBottom: '4px',
+            }}>
+              {edgeTooltip.title}
+            </div>
+            <div>{edgeTooltip.body}</div>
+          </div>
+        )}
 
         {/* Detail Panel */}
         {selectedNode && (

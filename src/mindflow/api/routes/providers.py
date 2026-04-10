@@ -226,9 +226,24 @@ async def validate_provider(provider_id: str):
     if config is None:
         raise HTTPException(status_code=404, detail="Provider not found")
 
-    provider = registry.get_provider_instance(provider_id)
+    # get_provider_instance can raise if e.g. OpenAIProvider(api_key=None)
+    # is attempted — the stored credentials exist but are empty. Catch and
+    # map to a 400 so the UI shows a clear "credentials missing" message
+    # instead of a bare 500.
+    try:
+        provider = registry.get_provider_instance(provider_id)
+    except ValueError as exc:
+        registry.set_status(provider_id, ProviderStatus.ERROR)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider credentials invalid or missing: {exc}",
+        )
     if provider is None:
-        raise HTTPException(status_code=502, detail="Cannot create provider instance")
+        registry.set_status(provider_id, ProviderStatus.ERROR)
+        raise HTTPException(
+            status_code=400,
+            detail="Provider has no credentials. Add an API key or authenticate via OAuth.",
+        )
 
     try:
         models = await _discover_models(config, provider)

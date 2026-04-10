@@ -13,6 +13,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, RefreshCw, Check, AlertCircle, Loader2, Pencil, X, ChevronDown, ChevronUp, LogIn, LogOut, Key, Globe, Shield } from 'lucide-react';
 import { useProviderStore } from '../stores/providerStore';
+import { logEvent } from '../stores/logStore';
 import type {
   ProviderType,
   AuthMethod,
@@ -248,12 +249,14 @@ export function ProviderSettingsPanel() {
       // OAuth: no credentials at creation time
 
       await addProvider(request);
+      logEvent('provider', 'success', `Added provider "${addName}" (${addType})`);
       setShowAddForm(false);
       setAddApiKey('');
       setAddName('');
       setAddModel('');
     } catch (err) {
       console.error('Failed to add provider:', err);
+      logEvent('provider', 'error', `Failed to add provider "${addName}"`, (err as Error).message);
     } finally {
       setSubmitting(false);
     }
@@ -287,10 +290,12 @@ export function ProviderSettingsPanel() {
 
       if (Object.keys(request).length > 0) {
         await updateProvider(provider.id, request);
+        logEvent('provider', 'success', `Updated provider "${provider.name}"`);
       }
       setEditingId(null);
     } catch (err) {
       console.error('Failed to update provider:', err);
+      logEvent('provider', 'error', `Failed to update provider "${provider.name}"`, (err as Error).message);
     } finally {
       setSaving(false);
     }
@@ -302,16 +307,20 @@ export function ProviderSettingsPanel() {
       setTimeout(() => setConfirmDeleteId(null), 3000);
       return;
     }
+    const name = providers.find((p) => p.id === id)?.name ?? id.slice(0, 8);
     try {
       await deleteProvider(id);
+      logEvent('provider', 'success', `Deleted provider "${name}"`);
       setConfirmDeleteId(null);
       if (editingId === id) setEditingId(null);
     } catch (err) {
       console.error('Failed to delete provider:', err);
+      logEvent('provider', 'error', `Failed to delete provider "${name}"`, (err as Error).message);
     }
   };
 
   const handleValidate = async (id: string) => {
+    const name = providers.find((p) => p.id === id)?.name ?? id.slice(0, 8);
     setValidatingId(id);
     // Clear any previous error for this provider
     setValidationErrors((prev) => {
@@ -320,9 +329,13 @@ export function ProviderSettingsPanel() {
     });
     try {
       await validateProvider(id);
+      const refreshed = useProviderStore.getState().providers.find((p) => p.id === id);
+      const modelCount = refreshed?.available_models?.length ?? 0;
+      logEvent('provider', 'success', `Validated "${name}" — ${modelCount} model${modelCount !== 1 ? 's' : ''} available`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Validation failed';
       setValidationErrors((prev) => ({ ...prev, [id]: message }));
+      logEvent('provider', 'error', `Validation failed for "${name}"`, message);
     } finally {
       setValidatingId(null);
     }

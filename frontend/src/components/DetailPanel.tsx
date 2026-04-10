@@ -27,6 +27,7 @@ import { LLMNodeContent } from './LLMNodeContent';
 import { DynamicNodeView } from './DynamicNodeView';
 import { useGraphExecution } from '../hooks/useGraphExecution';
 import { useNodeTypesStore } from '../stores/nodeTypesStore';
+import { logEvent } from '../stores/logStore';
 import { api } from '../services/api';
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -343,9 +344,18 @@ export function DetailPanel({
                 onChange={(e) => {
                   if (!graphId) return;
                   const newProviderId = e.target.value || null;
+                  const newProviderName =
+                    allProviders.find((p) => p.id === newProviderId)?.name ?? '(none)';
                   api.updateNode(graphId, node.id, { provider_id: newProviderId } as any)
-                    .then(() => onRefreshGraph?.())
-                    .catch(err => console.error('Failed to update provider:', err));
+                    .then(() => {
+                      logEvent('provider', 'info', `Node ${node.id.slice(0, 8)} → provider ${newProviderName}`);
+                      onRefreshGraph?.();
+                    })
+                    .catch((err) => {
+                      console.error('Failed to update provider:', err);
+                      // Error is already logged by the axios interceptor,
+                      // no need to log again here.
+                    });
                 }}
                 style={{
                   width: '100%',

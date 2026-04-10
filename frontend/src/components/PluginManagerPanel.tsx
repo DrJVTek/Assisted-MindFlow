@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw, Trash2, Upload, AlertCircle, CheckCircle2, Loader2, Package, Info } from 'lucide-react';
 import { useNodeTypesStore } from '../stores/nodeTypesStore';
+import { logEvent } from '../stores/logStore';
 
 interface PluginListItem {
   name: string;
@@ -108,10 +109,13 @@ export function PluginManagerPanel() {
       }
       const data = await res.json();
       setBanner({ kind: 'success', text: data.message });
+      logEvent('plugin', 'success', data.message || 'Plugin registry reloaded');
       forceRefreshNodeTypes();
       await fetchPlugins();
     } catch (err) {
-      setBanner({ kind: 'error', text: `Reload failed: ${(err as Error).message}` });
+      const msg = (err as Error).message;
+      setBanner({ kind: 'error', text: `Reload failed: ${msg}` });
+      logEvent('plugin', 'error', 'Plugin reload failed', msg);
       setLoading(false);
     }
   }, [fetchPlugins, forceRefreshNodeTypes]);
@@ -133,10 +137,13 @@ export function PluginManagerPanel() {
         }
         const data = await res.json();
         setBanner({ kind: 'success', text: data.message });
+        logEvent('plugin', 'success', `Deleted plugin "${pluginName}"`);
         forceRefreshNodeTypes();
         await fetchPlugins();
       } catch (err) {
-        setBanner({ kind: 'error', text: `Delete failed: ${(err as Error).message}` });
+        const msg = (err as Error).message;
+        setBanner({ kind: 'error', text: `Delete failed: ${msg}` });
+        logEvent('plugin', 'error', `Failed to delete plugin "${pluginName}"`, msg);
       } finally {
         setBusyFor(null);
       }
@@ -198,10 +205,13 @@ export function PluginManagerPanel() {
         }
         const data = await res.json();
         setBanner({ kind: 'success', text: data.message });
+        logEvent('plugin', 'success', `Uploaded plugin "${data.plugin_name || file.name}"`);
         forceRefreshNodeTypes();
         await fetchPlugins();
       } catch (err) {
-        setBanner({ kind: 'error', text: `Upload failed: ${(err as Error).message}` });
+        const msg = (err as Error).message;
+        setBanner({ kind: 'error', text: `Upload failed: ${msg}` });
+        logEvent('plugin', 'error', `Failed to upload plugin "${file.name}"`, msg);
         setLoading(false);
       }
     },

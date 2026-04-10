@@ -4,6 +4,7 @@
  */
 
 import axios, { type AxiosInstance, type AxiosError } from 'axios';
+import { logEvent } from '../stores/logStore';
 import type { Graph, NodeVersion } from '../types/graph';
 import type { CanvasViewport } from '../types/canvas';
 import type {
@@ -81,6 +82,16 @@ apiClient.interceptors.response.use(
         errorMessage = data.message;
       }
     }
+
+    // Mirror every HTTP error into the bottom log panel so the user
+    // sees them without opening devtools. Covers ALL endpoints through
+    // this single boundary point — we don't have to decorate every
+    // callsite individually.
+    const method = (error.config?.method || 'HTTP').toUpperCase();
+    const url = error.config?.url || '?';
+    const status = error.response?.status;
+    const label = status ? `${status} ${method} ${url}` : `${method} ${url}`;
+    logEvent('http', 'error', label, errorMessage);
 
     return Promise.reject(new Error(errorMessage));
   }

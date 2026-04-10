@@ -32,6 +32,7 @@ import { useCanvasStore } from '../stores/canvasStore';
 import { useNodeTypesStore } from '../stores/nodeTypesStore';
 import { useProviderStore } from '../stores/providerStore';
 import { useExecutionStore } from '../stores/executionStore';
+import { logEvent } from '../stores/logStore';
 import { useGraphData } from '../features/canvas/hooks/useGraphData';
 import { useViewport } from '../features/canvas/hooks/useViewport';
 import { useLayout } from '../features/canvas/hooks/useLayout';
@@ -320,9 +321,9 @@ function CanvasInner() {
       const targetHandle = connection.targetHandle;
 
       if (!sourceHandle || !targetHandle) {
-        console.error(
-          '[Canvas] Refusing connection with missing handles — this should not happen with a properly loaded node type registry.'
-        );
+        const msg = 'Refusing connection with missing handles — node metadata not loaded yet';
+        console.error('[Canvas]', msg);
+        logEvent('edge', 'warn', msg);
         return;
       }
 
@@ -331,6 +332,8 @@ function CanvasInner() {
 
       // Persist via PUT — the backend syncs parents/children from the named
       // connection automatically.
+      const shortSrc = (connection.source || '').slice(0, 8);
+      const shortTgt = (connection.target || '').slice(0, 8);
       try {
         const response = await fetch(`/api/graphs/${graphId}/nodes/${connection.target}`, {
           method: 'PUT',
@@ -345,9 +348,13 @@ function CanvasInner() {
         });
         if (!response.ok) {
           console.error('[Canvas] Failed to save connection:', response.statusText);
+          logEvent('edge', 'error', `Failed to create edge ${shortSrc}.${sourceHandle} → ${shortTgt}.${targetHandle}`, response.statusText);
+        } else {
+          logEvent('edge', 'success', `Connected ${shortSrc}.${sourceHandle} → ${shortTgt}.${targetHandle}`);
         }
       } catch (err) {
         console.error('[Canvas] Error saving connection:', err);
+        logEvent('edge', 'error', `Error creating edge ${shortSrc} → ${shortTgt}`, (err as Error).message);
       }
     },
     [graphId]
@@ -423,10 +430,12 @@ function CanvasInner() {
       if (!graphId) return;
 
       for (const edge of deletedEdges) {
+        const shortSrc = (edge.source || '').slice(0, 8);
+        const shortTgt = (edge.target || '').slice(0, 8);
         if (!edge.targetHandle) {
-          console.warn(
-            `[Canvas] Cannot delete edge ${edge.id}: missing named targetHandle.`
-          );
+          const msg = `Cannot delete edge ${shortSrc} → ${shortTgt}: missing named targetHandle`;
+          console.warn('[Canvas]', msg);
+          logEvent('edge', 'warn', msg);
           continue;
         }
 
@@ -440,9 +449,13 @@ function CanvasInner() {
               `[Canvas] Failed to delete connection ${edge.id}:`,
               response.statusText
             );
+            logEvent('edge', 'error', `Failed to delete edge ${shortSrc} → ${shortTgt}.${edge.targetHandle}`, response.statusText);
+          } else {
+            logEvent('edge', 'success', `Disconnected ${shortSrc} → ${shortTgt}.${edge.targetHandle}`);
           }
         } catch (err) {
           console.error(`[Canvas] Error deleting connection ${edge.id}:`, err);
+          logEvent('edge', 'error', `Error deleting edge ${shortSrc} → ${shortTgt}`, (err as Error).message);
         }
       }
     },
@@ -648,12 +661,13 @@ function CanvasInner() {
       return;
     }
 
+    const shortId = contextMenu.nodeId.slice(0, 8);
+    const typeLabel = nodeToDelete.class_type || nodeToDelete.type || 'node';
     try {
       console.log('Deleting node via API:', contextMenu.nodeId);
-
       await api.deleteNode(graphId, contextMenu.nodeId);
-
       console.log('Node deleted successfully');
+      logEvent('node', 'success', `Deleted ${typeLabel} node ${shortId}`);
 
       closeContextMenu();
 
@@ -661,7 +675,7 @@ function CanvasInner() {
       refreshGraph();
     } catch (error) {
       console.error('Error deleting node:', error);
-      console.error('Error deleting node:', error);
+      logEvent('node', 'error', `Failed to delete node ${shortId}`, (error as Error).message);
       closeContextMenu();
     }
   }, [contextMenu, graphData, graphId, closeContextMenu, refreshGraph]);
@@ -747,6 +761,7 @@ function CanvasInner() {
           status: 'draft',
           parent_ids: nodeCreatorParentId ? [nodeCreatorParentId] : [],
         });
+        logEvent('node', 'success', `Created ${classType} node ${createdNode.id.slice(0, 8)}`);
 
         // Build a Node-shaped object for the transform pipeline
         const nodeForTransform = {
@@ -802,7 +817,7 @@ function CanvasInner() {
         }, 1000);
       } catch (error) {
         console.error('Error creating node:', error);
-        console.error('Error creating node:', error);
+        logEvent('node', 'error', `Failed to create node`, (error as Error).message);
       }
     },
     [graphId, nodeCreatorParentId, nodeCreatorPosition, reactFlowInstance, selectNode]

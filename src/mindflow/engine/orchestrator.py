@@ -24,10 +24,11 @@ No implicit context accumulation. The graph defines what each node sees.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import re
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 from uuid import UUID
 
 from mindflow.engine.executor import GraphExecutor, CycleDetectedError
@@ -144,6 +145,41 @@ class Orchestrator:
         inputs = self._substitute_template_vars(inputs)
 
         return inputs
+
+    @staticmethod
+    def _filter_kwargs_for(func: Callable, inputs: dict[str, Any]) -> dict[str, Any]:
+        """Drop inputs that the callable can't accept.
+
+        The orchestrator eagerly populates the inputs dict with common keys
+        like `text` and `prompt` (from node.content) for backward compat,
+        but not every node declares those. Passing an unknown keyword to a
+        function without **kwargs raises TypeError. This helper filters the
+        dict down to only the parameters the function actually accepts.
+
+        If the function accepts **kwargs, no filtering is done — all keys
+        flow through and the callable decides what to use.
+        """
+        try:
+            sig = inspect.signature(func)
+        except (TypeError, ValueError):
+            # Built-in or C function — can't introspect, pass everything.
+            return inputs
+
+        has_var_kwargs = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
+        if has_var_kwargs:
+            return inputs
+
+        accepted = {
+            name for name, p in sig.parameters.items()
+            if p.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+        }
+        return {k: v for k, v in inputs.items() if k in accepted}
 
     @staticmethod
     def _substitute_template_vars(inputs: dict[str, Any]) -> dict[str, Any]:
@@ -267,8 +303,12 @@ class Orchestrator:
                 f"Check the plugin's FUNCTION attribute."
             )
 
-        # Call execute
-        result = func(**inputs)
+        # Call execute with only the inputs this function actually accepts.
+        # The orchestrator populates common keys (text, prompt, provider)
+        # eagerly, but e.g. TextInputNode.execute only declares `text` and
+        # would crash on an unexpected `prompt` keyword.
+        call_kwargs = self._filter_kwargs_for(func, inputs)
+        result = func(**call_kwargs)
         # Handle both sync and async
         if asyncio.iscoroutine(result):
             result = await result
@@ -439,10 +479,12 @@ class Orchestrator:
                 f"but has no stream() method."
             )
 
-        # Stream tokens one by one
+        # Stream tokens one by one. Filter inputs to the stream function's
+        # signature for the same reason as the batch-execute path.
         logger.info("Starting stream for node %s with model=%s", node_id, inputs.get("model", "?"))
+        stream_kwargs = self._filter_kwargs_for(stream_func, inputs)
         tokens = []
-        async for token in stream_func(**inputs):
+        async for token in stream_func(**stream_kwargs):
             tokens.append(token)
             yield {
                 "event": "token",

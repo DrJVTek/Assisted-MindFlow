@@ -98,36 +98,22 @@ export function transformNodesToConnections(
 ): ConnectionLine[] {
   const connections: ConnectionLine[] = [];
 
-  // Track which parent-child pairs already have named connections
-  const namedEdges = new Set<string>();
-
-  // First: create edges from explicit named connections (ComfyUI-style ports)
+  // Edges are derived exclusively from the `connections` dict (ComfyUI-style
+  // named ports). The legacy parents/children fallback has been removed —
+  // an edge without a named connection cannot exist in the UI anymore,
+  // because otherwise deleting it would leave a phantom that reappears on
+  // every page refresh.
   Object.values(nodes).forEach(node => {
-    if (node.connections) {
-      for (const [inputName, connSpec] of Object.entries(node.connections)) {
-        if (connSpec && connSpec.source_node_id) {
-          const edgeKey = `${connSpec.source_node_id}-${node.id}`;
-          namedEdges.add(edgeKey);
-          const conn = createConnectionLine(connSpec.source_node_id, node.id);
-          // Override ID to include port names for uniqueness
-          conn.id = `${connSpec.source_node_id}:${connSpec.output_name}-${node.id}:${inputName}`;
-          // Attach handle info (used in connectionLineToReactFlowEdge)
-          (conn as any).sourceHandle = connSpec.output_name;
-          (conn as any).targetHandle = inputName;
-          connections.push(conn);
-        }
+    if (!node.connections) return;
+    for (const [inputName, connSpec] of Object.entries(node.connections)) {
+      if (connSpec && connSpec.source_node_id) {
+        const conn = createConnectionLine(connSpec.source_node_id, node.id);
+        conn.id = `${connSpec.source_node_id}:${connSpec.output_name}-${node.id}:${inputName}`;
+        (conn as any).sourceHandle = connSpec.output_name;
+        (conn as any).targetHandle = inputName;
+        connections.push(conn);
       }
     }
-  });
-
-  // Second: create fallback edges for parent-child relationships without named connections
-  Object.values(nodes).forEach(node => {
-    node.children.forEach(childId => {
-      const edgeKey = `${node.id}-${childId}`;
-      if (!namedEdges.has(edgeKey)) {
-        connections.push(createConnectionLine(node.id, childId));
-      }
-    });
   });
 
   return connections;

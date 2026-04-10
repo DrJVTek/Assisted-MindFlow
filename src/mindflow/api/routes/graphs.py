@@ -392,35 +392,59 @@ async def update_node(
     if update_req.mcp_tools is not None:
         node.mcp_tools = update_req.mcp_tools
 
-    # Add parent relationship (edge creation via onConnect)
+    # Edge creation via onConnect.
+    # A connection MUST be a named ComfyUI-style port connection. The legacy
+    # `parent_id` path is kept as a minimal fallback for bare parent-child
+    # links but no new code should use it. Both paths keep parents/children
+    # in sync with the connections dict as the source of truth.
     if update_req.parent_id is not None:
         try:
             parent_uuid = UUID(update_req.parent_id)
-            if parent_uuid in graph.nodes:
-                if parent_uuid not in node.parents:
-                    node.parents.append(parent_uuid)
-                parent_node = graph.nodes[parent_uuid]
-                if node_uuid not in parent_node.children:
-                    parent_node.children.append(node_uuid)
-            else:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Parent node {update_req.parent_id} not found in graph",
-                )
         except ValueError:
             raise HTTPException(
                 status_code=400, detail=f"Invalid parent_id UUID: {update_req.parent_id}"
             )
+        if parent_uuid not in graph.nodes:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Parent node {update_req.parent_id} not found in graph",
+            )
+        if parent_uuid not in node.parents:
+            node.parents.append(parent_uuid)
+        parent_node = graph.nodes[parent_uuid]
+        if node_uuid not in parent_node.children:
+            parent_node.children.append(node_uuid)
 
-    # Named port connection (ComfyUI-style)
+    # Named port connection (ComfyUI-style, preferred).
+    # Writing this also syncs parents/children so both representations stay
+    # consistent, which is what lets `delete_node_connection` above clean
+    # both sides correctly.
     if update_req.connection is not None:
         conn = update_req.connection
-        if not hasattr(node, "connections") or node.connections is None:
+        if node.connections is None:
             node.connections = {}
         node.connections[conn.input_name] = {
             "source_node_id": conn.source_node_id,
             "output_name": conn.output_name,
         }
+
+        try:
+            source_uuid = UUID(conn.source_node_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid source_node_id UUID: {conn.source_node_id}",
+            )
+        if source_uuid not in graph.nodes:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Source node {conn.source_node_id} not found in graph",
+            )
+        if source_uuid not in node.parents:
+            node.parents.append(source_uuid)
+        source_node = graph.nodes[source_uuid]
+        if node_uuid not in source_node.children:
+            source_node.children.append(node_uuid)
 
     # Update timestamp
     node.update_timestamp()
@@ -441,6 +465,91 @@ async def update_node(
     )
 
     return node
+
+
+@router.delete("/{graph_id}/nodes/{node_id}/connections/{input_name}", status_code=204)
+async def delete_node_connection(
+    graph_id: str, node_id: str, input_name: str
+) -> None:
+    """Remove a named connection from a node's input port.
+
+    Removes the entry from `node.connections[input_name]` AND updates the
+    parents/children bidirectional lists to keep them in sync. If this was
+    the last connection from the source node to this node, the parent-child
+    link is also removed.
+
+    Args:
+        graph_id: UUID of the graph
+        node_id: UUID of the target node (the one receiving the input)
+        input_name: Name of the input port to disconnect
+
+    Raises:
+        HTTPException: 404 if graph/node not found, or input_name has no connection
+    """
+    logger.info(
+        f"DELETE /api/graphs/{graph_id}/nodes/{node_id}/connections/{input_name}"
+    )
+
+    _ensure_graph_loaded(graph_id)
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    try:
+        node_uuid = UUID(node_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid UUID format: {node_id}")
+
+    if node_uuid not in graph.nodes:
+        raise HTTPException(
+            status_code=404, detail=f"Node with ID {node_id} not found in graph"
+        )
+
+    node = graph.nodes[node_uuid]
+
+    if not node.connections or input_name not in node.connections:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No connection on input '{input_name}' of node {node_id}",
+        )
+
+    # Capture the source node id BEFORE removing the connection
+    source_node_id_str = node.connections[input_name].get("source_node_id")
+    del node.connections[input_name]
+
+    # Check if any other connections still come from the same source
+    # (a parent might feed multiple inputs of the same child)
+    if source_node_id_str:
+        try:
+            source_uuid = UUID(source_node_id_str)
+        except ValueError:
+            source_uuid = None
+
+        if source_uuid is not None:
+            still_connected = any(
+                conn and conn.get("source_node_id") == source_node_id_str
+                for conn in node.connections.values()
+            )
+
+            # If no more connections from this parent, remove the parent/child link
+            if not still_connected:
+                if source_uuid in node.parents:
+                    node.parents.remove(source_uuid)
+                if source_uuid in graph.nodes:
+                    parent_node = graph.nodes[source_uuid]
+                    if node_uuid in parent_node.children:
+                        parent_node.children.remove(node_uuid)
+
+    node.update_timestamp()
+    graph.meta.updated_at = node.meta.updated_at
+    _persist_graph(graph_id)
+
+    logger.info(
+        f"Removed connection on input '{input_name}' of node {node_id}"
+    )
 
 
 @router.delete("/{graph_id}/nodes/{node_id}", status_code=204)

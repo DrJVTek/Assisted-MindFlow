@@ -96,7 +96,11 @@ class Orchestrator:
         if node.content and "prompt" not in inputs:
             inputs["prompt"] = node.content
 
-        # Override with connected parent outputs
+        # Override with connected parent outputs via named ports.
+        # Connections are the sole source of truth for input wiring — the
+        # legacy auto-wire from `node.parents` has been removed because it
+        # silently constructed context strings that bypassed the plugin's
+        # declared INPUT_TYPES and made debugging impossible.
         connections = node.connections or {}
         for input_name, conn_spec in connections.items():
             if isinstance(conn_spec, dict):
@@ -108,27 +112,6 @@ class Orchestrator:
                     parent_outputs = self._outputs.get(source_uuid, {})
                     if output_name in parent_outputs:
                         inputs[input_name] = parent_outputs[output_name]
-
-        # Auto-wire: if node has parents but no explicit connections,
-        # build context from all parent outputs (backward compatibility)
-        if not connections and node.parents:
-            context_parts = []
-            for parent_id in node.parents:
-                parent_outputs = self._outputs.get(parent_id, {})
-                # Collect response or text from parent
-                if "response" in parent_outputs:
-                    parent_node = self._graph.nodes.get(parent_id)
-                    parent_prompt = parent_node.content if parent_node else ""
-                    context_parts.append(
-                        f"User: {parent_prompt}\nAssistant: {parent_outputs['response']}"
-                    )
-                elif "context" in parent_outputs:
-                    context_parts.append(parent_outputs["context"])
-                elif "text" in parent_outputs:
-                    context_parts.append(parent_outputs["text"])
-
-            if context_parts:
-                inputs["context"] = "\n\n".join(context_parts)
 
         # Fill missing inputs with defaults from INPUT_TYPES metadata
         node_cls = self._get_node_class(node_id)

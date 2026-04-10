@@ -178,8 +178,15 @@ class TestOrchestratorContextPassing:
         assert "[with context]" in results[n3]["outputs"]["response"]
 
     @pytest.mark.asyncio
-    async def test_auto_wire_without_explicit_connections(self):
-        """Nodes with parents but no explicit connections get auto-wired context."""
+    async def test_no_autowire_without_explicit_connections(self):
+        """Nodes with parents but no explicit connections do NOT auto-wire.
+
+        The auto-wire fallback that built context from parents silently was
+        removed in spec 015 because it bypassed the plugin's declared
+        INPUT_TYPES. Connections are now the sole source of truth for
+        input wiring — a node without connections runs standalone with its
+        own content only.
+        """
         n1 = uuid4()
         n2 = uuid4()
 
@@ -207,9 +214,10 @@ class TestOrchestratorContextPassing:
         orchestrator = Orchestrator(graph, registry)
         results = await orchestrator.execute(target=n2)
 
-        # Should still work — auto-wire puts parent text into context
+        # n2 runs without context — its own prompt is used, but no parent
+        # text was silently merged in.
         assert results[n2]["status"] == "completed"
-        assert "[with context]" in results[n2]["outputs"]["response"]
+        assert "[with context]" not in results[n2]["outputs"]["response"]
 
 
 class TestOrchestratorFailurePropagation:

@@ -293,43 +293,89 @@ function CanvasInner() {
     []
   );
 
-  // Handle new connection between nodes
+  // Handle new connection between nodes.
+  // Requires named handles (ComfyUI-style ports). If nodeTypesStore hasn't
+  // loaded yet, the handles will be __default_in/__default_out — in that
+  // case we refuse the connection and log an error rather than creating a
+  // half-typed edge that can't be cleanly deleted later.
   const onConnect = useCallback(
     async (connection: Connection) => {
       if (!graphId || !connection.source || !connection.target) return;
 
+      const sourceHandle = connection.sourceHandle;
+      const targetHandle = connection.targetHandle;
+
+      if (
+        !sourceHandle ||
+        !targetHandle ||
+        sourceHandle.startsWith('__default') ||
+        targetHandle.startsWith('__default')
+      ) {
+        console.error(
+          '[Canvas] Refusing connection with default handles — node metadata not yet loaded. Try again in a moment.'
+        );
+        return;
+      }
+
       // Add edge to local state
       setLocalEdges(eds => addEdge(connection, eds));
 
-      // Build the update payload
-      const updatePayload: Record<string, unknown> = {
-        parent_id: connection.source,
-      };
-
-      // If named handles are used (ComfyUI-style ports), save the connection mapping
-      // sourceHandle = output port name, targetHandle = input port name
-      const sourceHandle = connection.sourceHandle;
-      const targetHandle = connection.targetHandle;
-      if (targetHandle && !targetHandle.startsWith('__default') && sourceHandle && !sourceHandle.startsWith('__default')) {
-        updatePayload.connection = {
-          input_name: targetHandle,
-          source_node_id: connection.source,
-          output_name: sourceHandle,
-        };
-      }
-
-      // Persist parent/child relationship + named connection to backend
+      // Persist via PUT — the backend syncs parents/children from the named
+      // connection automatically.
       try {
         const response = await fetch(`/api/graphs/${graphId}/nodes/${connection.target}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updatePayload),
+          body: JSON.stringify({
+            connection: {
+              input_name: targetHandle,
+              source_node_id: connection.source,
+              output_name: sourceHandle,
+            },
+          }),
         });
         if (!response.ok) {
           console.error('[Canvas] Failed to save connection:', response.statusText);
         }
       } catch (err) {
         console.error('[Canvas] Error saving connection:', err);
+      }
+    },
+    [graphId]
+  );
+
+  // Handle edge deletion — user pressed Delete/Backspace on a selected edge,
+  // or edges were removed programmatically. Calls the backend DELETE endpoint
+  // which cleans up both `connections` dict and `parents/children` lists.
+  const onEdgesDelete = useCallback(
+    async (deletedEdges: { id: string; source: string; target: string; targetHandle?: string | null }[]) => {
+      if (!graphId) return;
+
+      for (const edge of deletedEdges) {
+        if (!edge.targetHandle || edge.targetHandle.startsWith('__default')) {
+          // Legacy edge with no named handle — can't be deleted via the
+          // connections endpoint. Log and skip; a graph refresh will re-add
+          // it from parents/children, signalling the inconsistency.
+          console.warn(
+            `[Canvas] Cannot delete edge ${edge.id}: missing named targetHandle. This edge was created before the connections model existed.`
+          );
+          continue;
+        }
+
+        try {
+          const response = await fetch(
+            `/api/graphs/${graphId}/nodes/${edge.target}/connections/${encodeURIComponent(edge.targetHandle)}`,
+            { method: 'DELETE' }
+          );
+          if (!response.ok) {
+            console.error(
+              `[Canvas] Failed to delete connection ${edge.id}:`,
+              response.statusText
+            );
+          }
+        } catch (err) {
+          console.error(`[Canvas] Error deleting connection ${edge.id}:`, err);
+        }
       }
     },
     [graphId]
@@ -1094,6 +1140,7 @@ function CanvasInner() {
           nodesDraggable={true}     // Enable node dragging with left mouse button
           nodesConnectable={true}   // Enable edge creation with type validation
           onConnect={onConnect}
+          onEdgesDelete={onEdgesDelete}
           isValidConnection={isValidConnection}
           elementsSelectable={true} // Allow selecting elements
           selectNodesOnDrag={false} // Don't select on drag (allows node movement)

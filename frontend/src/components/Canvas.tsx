@@ -29,6 +29,7 @@ import { Settings, RefreshCw, Undo, Redo } from 'lucide-react';
 import 'reactflow/dist/style.css';
 
 import { useCanvasStore } from '../stores/canvasStore';
+import { useNodeTypesStore } from '../stores/nodeTypesStore';
 import { useGraphData } from '../features/canvas/hooks/useGraphData';
 import { useViewport } from '../features/canvas/hooks/useViewport';
 import { useLayout } from '../features/canvas/hooks/useLayout';
@@ -85,6 +86,8 @@ export function Canvas() {
  */
 function CanvasInner() {
   const { selectNode, preferences, selectedNodeId, createCanvas, canvases, activeCanvasId, fetchCanvases } = useCanvasStore();
+  const fetchNodeTypes = useNodeTypesStore(s => s.fetchNodeTypes);
+  const nodeTypesLoaded = useNodeTypesStore(s => s.isLoaded);
   const [currentZoom, setCurrentZoom] = useState(1.0);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const reactFlowInstance = useReactFlow();
@@ -133,9 +136,15 @@ function CanvasInner() {
     () => reactFlowInstance.getNodes()
   );
 
-  // Load canvases on mount
+  // Load canvases and node-type metadata on mount.
+  // nodeTypesStore is the source of truth for port names, colors, display
+  // names, and credential specs — without this call the store stays empty
+  // and every Node falls through to the fallback "input"/"output" ports.
   useEffect(() => {
     fetchCanvases();
+    if (!nodeTypesLoaded) {
+      fetchNodeTypes();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 

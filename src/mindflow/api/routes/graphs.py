@@ -88,11 +88,21 @@ def _migrate_legacy_nodes(graph: Graph) -> bool:
             renamed: dict[str, dict] = {}
             for input_name, spec in node.connections.items():
                 new_name = _LEGACY_PORT_RENAMES.get(input_name, input_name)
-                renamed[new_name] = spec
+                # Also rename the output_name inside the spec — the
+                # source node's output port was likely the legacy
+                # __default_out → "output", which is now "response"
+                # for llm_chat.
+                new_spec = dict(spec) if isinstance(spec, dict) else spec
+                if isinstance(new_spec, dict) and "output_name" in new_spec:
+                    old_out = new_spec["output_name"]
+                    new_out = _LEGACY_PORT_RENAMES.get(old_out, old_out)
+                    if new_out != old_out:
+                        new_spec["output_name"] = new_out
+                        changed = True
+                renamed[new_name] = new_spec
                 if new_name != input_name:
                     changed = True
-            if changed:
-                node.connections = renamed
+            node.connections = renamed
 
     if changed:
         logger.info(

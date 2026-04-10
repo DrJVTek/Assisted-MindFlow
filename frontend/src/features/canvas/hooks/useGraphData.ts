@@ -62,7 +62,7 @@ export function useGraphData(graphId: string | null) {
     fetchGraph();
   }, [graphId, setGraphData, graphData]);
 
-  /** Force re-fetch graph data from the API, bypassing cache. */
+  /** Force re-fetch graph data from the API, bypassing the hook's "already loaded" guard. */
   const refreshGraph = useCallback(async () => {
     if (!graphId) return;
     try {

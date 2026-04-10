@@ -283,8 +283,6 @@ class Orchestrator:
                 f"Node class '{node.class_type}' has no function '{func_name}'. "
                 f"Check the plugin's FUNCTION attribute."
             )
-            self._outputs[node_id] = outputs
-            return outputs
 
         # Call execute
         result = func(**inputs)

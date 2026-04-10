@@ -84,6 +84,7 @@ export function DetailPanel({
   const [autoCreatedChildId, setAutoCreatedChildId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevLlmStatusRef = useRef<string | null>(null);
+  const savedContentRef = useRef(node.content);
 
   // Node type info (must come before provider resolution)
   const classType = node.class_type || node.type;
@@ -143,8 +144,6 @@ export function DetailPanel({
   const handleContentChange = useCallback((newContent: string) => {
     setContent(newContent);
   }, []);
-
-  const savedContentRef = useRef(node.content);
 
   const handleSaveContent = useCallback(async () => {
     if (!graphId || content === savedContentRef.current) return;

@@ -168,6 +168,6 @@ export const defaultPreferences: UIPreferences = {
   gridVisible: true,
   gridSize: 50,
   snapToGrid: false,
-  theme: 'light',
+  theme: 'dark',
   autoFitOnLoad: true,
 };

@@ -239,8 +239,8 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     <div
       className={`mindflow-node${isExecuting ? ' mindflow-node--executing' : ''}${isComplete ? ' mindflow-node--complete' : ''}${isError ? ' mindflow-node--error' : ''}`}
       style={{
-        backgroundColor: '#1E1E2E',
-        borderColor: selected ? '#4FC3F7' : isExecuting ? '#2196F3' : isError ? '#F44336' : isComplete ? '#4CAF50' : '#2A2A40',
+        backgroundColor: 'var(--node-bg)',
+        borderColor: selected ? 'var(--primary-color)' : isExecuting ? 'var(--primary-color)' : isError ? 'var(--danger-color)' : isComplete ? 'var(--success-color)' : 'var(--node-border)',
         borderWidth: selected ? 2 : 1,
         borderStyle: 'solid',
         borderRadius: '6px',
@@ -277,7 +277,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
             background: port.color,
             width: 10,
             height: 10,
-            border: '2px solid #1E1E2E',
+            border: '2px solid var(--node-bg)',
             left: -5,
           }}
         />
@@ -295,7 +295,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
             background: port.color,
             width: 10,
             height: 10,
-            border: '2px solid #1E1E2E',
+            border: '2px solid var(--node-bg)',
             right: -5,
           }}
         />
@@ -404,7 +404,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
                 {allInputPorts.map(p => (
                   <span key={p.name} style={{
-                    fontSize: '8px', color: '#6B7280', lineHeight: `${PORT_H}px`,
+                    fontSize: '8px', color: 'var(--node-text-muted)', lineHeight: `${PORT_H}px`,
                     display: 'flex', alignItems: 'center', gap: '3px',
                   }}>
                     <span style={{ width: 5, height: 5, borderRadius: '50%', backgroundColor: p.color, display: 'inline-block' }} />
@@ -415,7 +415,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', alignItems: 'flex-end' }}>
                 {outputPorts.map(p => (
                   <span key={p.name} style={{
-                    fontSize: '8px', color: '#6B7280', lineHeight: `${PORT_H}px`,
+                    fontSize: '8px', color: 'var(--node-text-muted)', lineHeight: `${PORT_H}px`,
                     display: 'flex', alignItems: 'center', gap: '3px', flexDirection: 'row-reverse',
                   }}>
                     <span style={{ width: 5, height: 5, borderRadius: '50%', backgroundColor: p.color, display: 'inline-block' }} />
@@ -430,11 +430,11 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
           {contentPreview && (
             <div style={{
               fontSize: '10px',
-              color: '#9CA3AF',
+              color: 'var(--node-text-secondary)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              borderTop: '1px solid #2A2A40',
+              borderTop: '1px solid var(--node-border)',
               paddingTop: '3px',
               marginTop: '2px',
             }}>
@@ -446,7 +446,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
           {responsePreview && (
             <div style={{
               fontSize: '9px',
-              color: '#6B7280',
+              color: 'var(--node-text-muted)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',

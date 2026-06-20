@@ -3,6 +3,7 @@
  */
 
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import type { Graph } from '../types/graph';
 import type { Canvas, UIPreferences } from '../types/canvas';
 import { defaultPreferences } from '../types/canvas';
@@ -72,7 +73,7 @@ const initialState = {
   preferences: defaultPreferences,
 };
 
-export const useCanvasStore = create<CanvasStore>((set, get) => ({
+export const useCanvasStore = create<CanvasStore>()(persist((set, get) => ({
   ...initialState,
 
   // Fetch all canvases from API
@@ -289,4 +290,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   },
 
   reset: () => set(initialState),
+}), {
+  // Persist ONLY the preferences slice — canvases/graphData/viewport are
+  // server/session state and must NOT be rehydrated from localStorage.
+  name: 'mindflow-ui-preferences',
+  partialize: (state) => ({ preferences: state.preferences }),
 }));

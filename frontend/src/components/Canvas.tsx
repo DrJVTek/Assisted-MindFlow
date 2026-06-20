@@ -1161,6 +1161,21 @@ function CanvasInner() {
             {formatZoomPercentage(currentZoom)}
           </Panel>
 
+          {/* Brand bar */}
+          <Panel position="top-center" style={{
+            backgroundColor: 'var(--panel-bg)',
+            color: 'var(--node-text)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '6px 12px',
+            borderRadius: '6px',
+            boxShadow: 'var(--shadow-md)',
+          }}>
+            <img src="/logo.png" alt="MindFlow" style={{ width: 22, height: 22, objectFit: 'contain' }} draggable={false} />
+            <span style={{ fontWeight: 700, letterSpacing: '-0.3px' }}>MindFlow</span>
+          </Panel>
+
           {/* Toolbar buttons */}
           <Panel position="top-right" style={{
             backgroundColor: 'var(--panel-bg)',

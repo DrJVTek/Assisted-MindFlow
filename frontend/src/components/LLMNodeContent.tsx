@@ -48,25 +48,20 @@ export interface LLMNodeContentProps {
 }
 
 export function LLMNodeContent({
-  nodeId,
-  graphId,
   content,
   llmResponse,
   llmStatus,
   llmError,
   promptHeight,
-  responseHeight,
   noteTop,
   noteBottom,
   fontSize = 14,
   contextInfo,
   onContentChange,
   onHeightsChange,
-  onNoteChange,
   onGenerateClick,
   onStopClick,
   onRefreshClick,
-  isNewNode = false,
 }: LLMNodeContentProps) {
   const [editedContent, setEditedContent] = useState(content);
   const [isTopNoteExpanded, setIsTopNoteExpanded] = useState(false);

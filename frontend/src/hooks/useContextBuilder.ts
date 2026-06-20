@@ -9,7 +9,7 @@
  */
 
 import { useMemo } from 'react';
-import type { Node, Graph, UUID } from '../types/graph';
+import type { Node, Graph } from '../types/graph';
 import { getModelContextLimit } from '../constants/modelLimits';
 
 interface LLMWorkflowSettings {

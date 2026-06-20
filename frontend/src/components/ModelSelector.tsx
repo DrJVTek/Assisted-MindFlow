@@ -5,7 +5,6 @@
  * Shows selected model, triggers model change on selection.
  */
 
-import React from 'react';
 import { RefreshCw } from 'lucide-react';
 
 export interface ModelInfo {

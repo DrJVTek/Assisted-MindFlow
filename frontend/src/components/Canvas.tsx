@@ -175,7 +175,7 @@ function CanvasInner() {
   const { graphData, isLoading, error, refreshGraph } = useGraphData(graphId || '');
 
   // Viewport management with persistence
-  const { saveViewport, fitView, zoomIn, zoomOut } = useViewport(graphId);
+  const { saveViewport, zoomIn, zoomOut } = useViewport(graphId);
 
   // Layout reorganization with undo/redo
   const {
@@ -823,35 +823,6 @@ function CanvasInner() {
     [graphId, nodeCreatorParentId, nodeCreatorPosition, reactFlowInstance, selectNode]
   );
 
-  // Handle node update
-  const handleUpdateNode = useCallback(
-    async (nodeId: string, updates: {
-      content: string;
-      importance: number;
-      tags: string[];
-      status: string;
-      type: string;
-    }) => {
-      if (!graphId) return;
-      try {
-        console.log('Updating node via API:', nodeId, updates);
-
-        const updatedNode = await api.updateNode(graphId, nodeId, updates);
-
-        console.log('Node updated successfully:', updatedNode);
-
-        // Refresh to pick up any backend-side changes (timestamps, etc.).
-        // If the user wants to propagate the change to descendants, they
-        // click Generate on the terminal node they care about — the
-        // orchestrator will re-execute all ancestors in topological order.
-        refreshGraph();
-      } catch (error) {
-        console.error('Error updating node:', error);
-      }
-    },
-    [graphId, graphData, refreshGraph]
-  );
-
   // Handle NodeEditor save
   const handleNodeEditorSave = useCallback(async (nodeId: string, updates: {
     type?: string;
@@ -868,26 +839,6 @@ function CanvasInner() {
       console.error('Error updating node:', error);
     }
   }, [graphId, refreshGraph]);
-
-  // Handle node from AggregatePanel
-  const handleNavigateToNode = useCallback((nodeId: string) => {
-    // Find node in local nodes
-    const node = localNodes.find(n => n.id === nodeId);
-    if (!node) {
-      console.warn('Node not found:', nodeId);
-      return;
-    }
-
-    // Pan to node with smooth transition
-    reactFlowInstance.setCenter(
-      node.position.x + (node.width || 200) / 2,
-      node.position.y + (node.height || 100) / 2,
-      { zoom: 1.5, duration: 800 }
-    );
-
-    // Select the node
-    selectNode(nodeId);
-  }, [localNodes, reactFlowInstance, selectNode]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1364,7 +1315,6 @@ function CanvasInner() {
               graphId={graphId || ''}
               allNodes={graphData?.nodes || {}}
               onClose={() => selectNode(null)}
-              onUpdate={handleUpdateNode}
               onCreateChild={handleCreateChildFromPanel}
               onSelectNode={(nodeId) => selectNode(nodeId)}
               onRefreshGraph={refreshGraph}

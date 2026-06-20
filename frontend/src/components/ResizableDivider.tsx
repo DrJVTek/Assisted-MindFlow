@@ -20,7 +20,6 @@ export function ResizableDivider({
     onResizeEnd,
     minTopHeight = 100,
     minBottomHeight = 100,
-    containerHeight,
     initialTopHeight,
 }: ResizableDividerProps) {
     const [isDragging, setIsDragging] = useState(false);

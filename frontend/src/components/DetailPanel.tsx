@@ -78,9 +78,7 @@ export function DetailPanel({
   graphId,
   allNodes,
   onClose,
-  onUpdate,
   onCreateChild,
-  onSelectNode,
   onRefreshGraph,
 }: DetailPanelProps) {
   const [content, setContent] = useState(node.content);
@@ -142,7 +140,7 @@ export function DetailPanel({
   useEffect(() => {
     const currentStatus = node.llm_status;
     const prevStatus = prevLlmStatusRef.current;
-    prevLlmStatusRef.current = currentStatus;
+    prevLlmStatusRef.current = currentStatus ?? null;
 
     if (
       prevStatus &&

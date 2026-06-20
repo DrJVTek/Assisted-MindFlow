@@ -8,7 +8,7 @@
  * - Input/output handles matching the composite definition
  */
 
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Handle, Position } from 'reactflow';
 
 interface CompositeNodeProps {

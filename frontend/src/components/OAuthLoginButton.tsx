@@ -8,7 +8,7 @@
  * - Expired: "Session expired — Sign in again" banner
  */
 
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { LogIn, LogOut, Loader2, AlertTriangle } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 

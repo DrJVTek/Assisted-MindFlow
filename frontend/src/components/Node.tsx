@@ -89,8 +89,6 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     type = 'note' as NodeType,
     class_type,
     author = 'human' as NodeAuthor,
-    status = 'draft' as NodeStatus,
-    importance = 0.5,
     opacity = 1.0,
     currentZoom = 1.0,
     content = '',

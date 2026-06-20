@@ -125,7 +125,8 @@ frontend/src/
   - `test_openai_chatgpt_provider` (6): assert an old fallback that NO-FALLBACK removed (code is right).
   - `test_node_model` (2) + `test_provider_contracts` (1): expect validations / `502` the code relaxed (now `400`).
   - Gemini (`test_provider_isolation`, `..._no_fallback::Gemini`, `test_provider_registry`): `from google import genai` ↔ installed `google-generativeai` SDK mismatch (dependency decision needed).
-  → all repaired in **Phase 2**.
+  → **all repaired** (4 stale-test clusters + 2 decisions: Node validation relaxation kept,
+    Gemini dep → `google-genai`). Suite now **654 passed / 0 failed / 0 errors**.
 - [ ] **Phase 1 — Engine coherence.**
   - [x] **Invert engine→api dependency** — provider resolution fully injected via new
         `Orchestrator(provider_type_resolver=…)`; engine no longer imports `mindflow.api`.
@@ -135,7 +136,9 @@ frontend/src/
 - [ ] **Phase 2 — Backend tidy.** Sub-package `services/`, dedup MCP server, `on_event`→`lifespan`,
       single composition root, consolidate test trees.
 - [ ] **Phase 3 — Frontend modularization.** Feature-based migration; decompose `Canvas.tsx`.
-- [ ] **Phase 4 — UI polish.** Tokens/theme, visual hierarchy, per-node execution status.
+- [~] **Phase 4 — UI polish** (started). Done: dark theme unified (default + nodes driven by
+      tokens), bezier edges tinted by source port type. Next: node refinement, **Thread mode** (the
+      simple ChatGPT-like view), branding (logos). Both light + dark themes verified coherent.
 - [ ] **Phase 5 — Unblock the vision.** Real incremental recompute; first-class "merge" gesture;
       image/schema nodes; finalized debate node; groups-as-functions exposed over MCP.
 - [ ] **Phase 6 — Docs & guardrails.** Architecture docs; layering lint (forbid `engine → api`).

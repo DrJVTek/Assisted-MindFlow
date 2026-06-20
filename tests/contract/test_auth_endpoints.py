@@ -20,7 +20,7 @@ from mindflow.models.provider import (
     CreateProviderRequest,
     ProviderType,
 )
-from mindflow.services.provider_registry import ProviderRegistry
+from mindflow.services.auth.provider_registry import ProviderRegistry
 
 
 @pytest.fixture

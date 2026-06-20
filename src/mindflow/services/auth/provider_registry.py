@@ -20,9 +20,9 @@ from mindflow.models.provider import (
     UpdateProviderRequest,
 )
 from mindflow.providers.base import LLMProvider
-from mindflow.services.oauth_service import OAuthService, get_oauth_config
-from mindflow.services.secret_storage import SecretStorage
-from mindflow.services.token_storage import TokenStorage
+from mindflow.services.auth.oauth_service import OAuthService, get_oauth_config
+from mindflow.services.auth.secret_storage import SecretStorage
+from mindflow.services.auth.token_storage import TokenStorage
 
 logger = logging.getLogger(__name__)
 

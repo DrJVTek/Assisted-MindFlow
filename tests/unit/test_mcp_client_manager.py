@@ -1,4 +1,4 @@
-"""Unit tests for mindflow.services.mcp_client_manager module (T050).
+"""Unit tests for mindflow.services.mcp.client_manager module (T050).
 
 Tests MCPClientManager lifecycle: list, get_all_tools, config persistence.
 Uses mocks to avoid actual MCP server connections.
@@ -17,7 +17,7 @@ from mindflow.models.mcp_connection import (
     RemoteMCPTool,
     TransportType,
 )
-from mindflow.services.mcp_client_manager import MCPClientManager
+from mindflow.services.mcp.client_manager import MCPClientManager
 
 
 # ── Fixtures ──────────────────────────────────────────────────

@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from mindflow.models.oauth_session import OAuthSession
 from mindflow.models.provider import ProviderType
-from mindflow.services.token_storage import TokenStorage
+from mindflow.services.auth.token_storage import TokenStorage
 
 logger = logging.getLogger(__name__)
 

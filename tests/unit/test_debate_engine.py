@@ -1,4 +1,4 @@
-"""Unit tests for mindflow.services.debate_engine module.
+"""Unit tests for mindflow.services.graph.debate_engine module.
 
 Tests discover_chain, check_chain_cycles, validate_providers,
 get_debate, list_debates, stop_debate, and _format_history.
@@ -11,8 +11,8 @@ import pytest
 from mindflow.models.debate import DebateChain, DebateStatus
 from mindflow.models.graph import Graph, GraphMetadata
 from mindflow.models.node import Node
-from mindflow.services import debate_engine
-from mindflow.services.debate_engine import (
+from mindflow.services.graph import debate_engine
+from mindflow.services.graph.debate_engine import (
     _format_history,
     check_chain_cycles,
     discover_chain,

@@ -2,7 +2,7 @@
 
 import pytest
 
-from mindflow.services.graph_migration import migrate_graph_data, LEGACY_TYPE_MAP
+from mindflow.services.graph.graph_migration import migrate_graph_data, LEGACY_TYPE_MAP
 
 
 class TestLegacyGraphMigration:

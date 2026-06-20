@@ -8,7 +8,7 @@ standard way for Claude Code and other MCP clients to connect.
 For SSE transport (HTTP-based), pass --sse flag.
 
 This module is ONLY the CLI entry point. The FastMCP instance and all tools
-live in ``mindflow.services.mcp_server`` — do not add tool definitions or
+live in ``mindflow.services.mcp.server`` — do not add tool definitions or
 business logic here.
 """
 
@@ -35,7 +35,7 @@ def main():
     )
     args = parser.parse_args()
 
-    from mindflow.services.mcp_server import mcp
+    from mindflow.services.mcp.server import mcp
 
     if args.sse:
         logger.info("Starting MindFlow MCP Server on port %d (SSE transport)", args.port)

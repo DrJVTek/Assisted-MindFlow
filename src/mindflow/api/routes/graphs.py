@@ -20,8 +20,8 @@ from mindflow.models.group import Group, GroupKind, GroupMetadata
 from mindflow.models.comment import Comment, CommentTarget
 from mindflow.models.node_version import NodeVersion, TriggerReason
 from mindflow.api.routes.providers import _get_registry
-from mindflow.services.version_storage import get_version_storage
-from mindflow.services.graph_service import GraphService
+from mindflow.services.storage.version_storage import get_version_storage
+from mindflow.services.graph.graph_service import GraphService
 
 # Configure logging
 logger = logging.getLogger(__name__)

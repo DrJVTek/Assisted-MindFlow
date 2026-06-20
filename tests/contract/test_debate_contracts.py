@@ -12,7 +12,7 @@ from mindflow.api.server import app
 from mindflow.api.routes.graphs import add_graph_to_storage, _graphs_storage
 from mindflow.models.graph import Graph, GraphMetadata
 from mindflow.models.node import Node
-from mindflow.services import debate_engine
+from mindflow.services.graph import debate_engine
 
 
 @pytest.fixture(autouse=True)

@@ -12,7 +12,7 @@ import pytest
 
 from mindflow.models.oauth_session import OAuthSession
 from mindflow.models.provider import ProviderType
-from mindflow.services.oauth_service import (
+from mindflow.services.auth.oauth_service import (
     OAUTH_CONFIGS,
     OAuthService,
     generate_code_challenge,
@@ -20,7 +20,7 @@ from mindflow.services.oauth_service import (
     generate_state,
     get_oauth_config,
 )
-from mindflow.services.token_storage import TokenStorage
+from mindflow.services.auth.token_storage import TokenStorage
 
 # OAuth config used across tests (OpenAI/ChatGPT share the same endpoints).
 _OPENAI_CONFIG = OAUTH_CONFIGS[ProviderType.OPENAI]
@@ -200,7 +200,7 @@ class TestTokenRefresh:
         mock_response.raise_for_status = lambda: None
         mock_response.json = lambda: token_data
 
-        with patch("mindflow.services.oauth_service.httpx.AsyncClient") as MockClient:
+        with patch("mindflow.services.auth.oauth_service.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -224,7 +224,7 @@ class TestTokenRefresh:
         storage.save_session(session, TEST_PROVIDER_ID)
         service = _make_service(storage)
 
-        with patch("mindflow.services.oauth_service.httpx.AsyncClient") as MockClient:
+        with patch("mindflow.services.auth.oauth_service.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post.side_effect = Exception("invalid_grant")
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -261,7 +261,7 @@ class TestDeviceCodeFlow:
         mock_response.raise_for_status = lambda: None
         mock_response.json = lambda: device_data
 
-        with patch("mindflow.services.oauth_service.httpx.AsyncClient") as MockClient:
+        with patch("mindflow.services.auth.oauth_service.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -269,7 +269,7 @@ class TestDeviceCodeFlow:
             MockClient.return_value = mock_client
 
             # Patch asyncio.create_task to avoid background polling
-            with patch("mindflow.services.oauth_service.asyncio.create_task"):
+            with patch("mindflow.services.auth.oauth_service.asyncio.create_task"):
                 result = await service.start_device_code_flow()
 
         assert result["user_code"] == "ABCD-1234"

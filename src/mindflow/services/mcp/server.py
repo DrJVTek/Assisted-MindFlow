@@ -21,7 +21,7 @@ from uuid import UUID
 
 from mcp.server.fastmcp import FastMCP
 
-from mindflow.services.canvas_service import CanvasService
+from mindflow.services.storage.canvas_service import CanvasService
 from mindflow.api.routes.graphs import (
     get_graph_from_storage,
     # Unused here, but kept as the patch target for
@@ -29,7 +29,7 @@ from mindflow.api.routes.graphs import (
     add_graph_to_storage,  # noqa: F401
 )
 from mindflow.api.routes.providers import _get_registry
-from mindflow.services import debate_engine
+from mindflow.services.graph import debate_engine
 
 logger = logging.getLogger(__name__)
 

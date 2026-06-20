@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mindflow.models.oauth_session import OAuthSession
-from mindflow.services.token_storage import TokenStorage
+from mindflow.services.auth.token_storage import TokenStorage
 
 PROVIDER_ID = "openai"
 

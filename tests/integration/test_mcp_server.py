@@ -9,7 +9,7 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from uuid import uuid4
 
-from mindflow.services.mcp_server import (
+from mindflow.services.mcp.server import (
     mcp,
     list_canvases,
     get_canvas,
@@ -30,7 +30,7 @@ class TestMCPServerIntegration:
     @pytest.mark.asyncio
     async def test_list_canvases_returns_json(self):
         """list_canvases should return valid JSON with canvases key."""
-        with patch("mindflow.services.mcp_server._canvas_service") as mock_svc:
+        with patch("mindflow.services.mcp.server._canvas_service") as mock_svc:
             mock_svc.list_all.return_value = []
             result = await list_canvases()
             parsed = json.loads(result)
@@ -42,7 +42,7 @@ class TestMCPServerIntegration:
         """get_canvas with unknown ID should return error."""
         fake_id = str(uuid4())
         with patch(
-            "mindflow.services.mcp_server.get_graph_from_storage", return_value=None
+            "mindflow.services.mcp.server.get_graph_from_storage", return_value=None
         ):
             result = await get_canvas(canvas_id=fake_id)  # canvas_id is the actual param name
             assert "not found" in result.lower() or "error" in result.lower()
@@ -84,7 +84,7 @@ class TestMCPServerIntegration:
         mock_graph.id = gid
 
         with patch(
-            "mindflow.services.mcp_server.get_graph_from_storage",
+            "mindflow.services.mcp.server.get_graph_from_storage",
             return_value=mock_graph,
         ):
             result = await read_node(graph_id=str(gid), node_id=str(nid))
@@ -102,7 +102,7 @@ class TestMCPServerIntegration:
         mock_graph.nodes = {}
 
         with patch(
-            "mindflow.services.mcp_server.get_graph_from_storage",
+            "mindflow.services.mcp.server.get_graph_from_storage",
             return_value=mock_graph,
         ):
             result = await delete_node(graph_id=graph_id, node_id=node_id)
@@ -125,10 +125,10 @@ class TestMCPServerIntegration:
         mock_graph.id = gid
 
         with patch(
-            "mindflow.services.mcp_server.get_graph_from_storage",
+            "mindflow.services.mcp.server.get_graph_from_storage",
             return_value=mock_graph,
         ):
-            with patch("mindflow.services.mcp_server.add_graph_to_storage"):
+            with patch("mindflow.services.mcp.server.add_graph_to_storage"):
                 result = await update_node(
                     graph_id=str(gid),
                     node_id=str(nid),

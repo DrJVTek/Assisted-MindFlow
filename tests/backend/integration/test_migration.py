@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from mindflow.services.graph_migration import migrate_graph_data, CURRENT_VERSION
+from mindflow.services.graph.graph_migration import migrate_graph_data, CURRENT_VERSION
 
 
 class TestLegacyCanvasMigrationEndToEnd:

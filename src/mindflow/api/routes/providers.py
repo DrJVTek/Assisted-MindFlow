@@ -28,7 +28,7 @@ from mindflow.models.provider import (
     ProviderType,
     UpdateProviderRequest,
 )
-from mindflow.services.provider_registry import ProviderRegistry
+from mindflow.services.auth.provider_registry import ProviderRegistry
 
 logger = logging.getLogger(__name__)
 

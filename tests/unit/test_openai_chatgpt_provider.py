@@ -20,7 +20,7 @@ from mindflow.providers.openai_chatgpt import (
     CHATGPT_BACKEND_URL,
     OpenAIChatGPTProvider,
 )
-from mindflow.services.oauth_service import OAuthService
+from mindflow.services.auth.oauth_service import OAuthService
 
 
 def _make_jwt_with_account(account_id: str) -> str:

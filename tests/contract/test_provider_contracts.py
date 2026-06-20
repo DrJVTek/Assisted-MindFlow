@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from mindflow.api.server import app
 from mindflow.models.provider import ProviderStatus, ProviderType
-from mindflow.services.provider_registry import ProviderRegistry
+from mindflow.services.auth.provider_registry import ProviderRegistry
 
 
 @pytest.fixture(autouse=True)

@@ -16,8 +16,8 @@ from pydantic import BaseModel, Field
 
 from mindflow.api.routes.graphs import _graphs_storage
 from mindflow.models.conversation import ConversationSummary, ProjectSummary
-from mindflow.services.chatgpt_client import ChatGPTClient
-from mindflow.services.conversation_import import ConversationImporter
+from mindflow.services.llm_web.chatgpt_client import ChatGPTClient
+from mindflow.services.llm_web.conversation_import import ConversationImporter
 
 logger = logging.getLogger(__name__)
 

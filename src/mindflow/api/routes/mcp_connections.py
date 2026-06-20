@@ -21,7 +21,7 @@ from mindflow.models.mcp_connection import (
     CreateMCPConnectionRequest,
     TransportType,
 )
-from mindflow.services.mcp_client_manager import MCPClientManager
+from mindflow.services.mcp.client_manager import MCPClientManager
 
 logger = logging.getLogger(__name__)
 

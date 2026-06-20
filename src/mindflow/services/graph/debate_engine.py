@@ -12,7 +12,7 @@ from uuid import UUID
 
 from mindflow.models.debate import DebateChain, DebateStatus
 from mindflow.models.graph import Graph
-from mindflow.services.provider_registry import ProviderRegistry
+from mindflow.services.auth.provider_registry import ProviderRegistry
 from mindflow.utils.cycles import has_cycle
 
 logger = logging.getLogger(__name__)

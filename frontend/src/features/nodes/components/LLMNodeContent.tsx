@@ -16,8 +16,8 @@ import { useState, useCallback, useEffect } from 'react';
 import { Play, Square, RefreshCw, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { ResizableDivider } from './ResizableDivider';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { Button } from './ui/Button';
-import type { UUID } from '../types/uuid';
+import { Button } from '../../../components/ui/Button';
+import type { UUID } from '../../../types/uuid';
 import './LLMNodeContent.css';
 
 export interface LLMNodeContentProps {

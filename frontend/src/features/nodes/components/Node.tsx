@@ -15,10 +15,10 @@
 import React, { memo, useMemo, useCallback, useState } from 'react';
 import { Handle, Position } from 'reactflow';
 import { Bot, User, Wrench, Loader, Check, AlertCircle, Play, Square } from 'lucide-react';
-import type { NodeType, NodeAuthor, NodeStatus } from '../types/graph';
-import { useNodeTypesStore } from '../stores/nodeTypesStore';
-import { useProviderStore } from '../stores/providerStore';
-import { useExecutionStore } from '../stores/executionStore';
+import type { NodeType, NodeAuthor, NodeStatus } from '../../../types/graph';
+import { useNodeTypesStore } from '../../../stores/nodeTypesStore';
+import { useProviderStore } from '../../../stores/providerStore';
+import { useExecutionStore } from '../../../stores/executionStore';
 
 // ─── Types ───────────────────────────────────────────────────────────
 

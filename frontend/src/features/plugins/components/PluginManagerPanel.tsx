@@ -15,8 +15,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw, Trash2, Upload, AlertCircle, CheckCircle2, Loader2, Package, Info } from 'lucide-react';
-import { useNodeTypesStore } from '../stores/nodeTypesStore';
-import { logEvent } from '../stores/logStore';
+import { useNodeTypesStore } from '../../../stores/nodeTypesStore';
+import { logEvent } from '../../../stores/logStore';
 
 interface PluginListItem {
   name: string;

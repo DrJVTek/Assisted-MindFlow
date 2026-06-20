@@ -12,21 +12,21 @@
 
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, RefreshCw, Check, AlertCircle, Loader2, Pencil, X, ChevronDown, ChevronUp, LogIn, LogOut, Key, Globe, Shield } from 'lucide-react';
-import { useProviderStore } from '../stores/providerStore';
-import { logEvent } from '../stores/logStore';
+import { useProviderStore } from '../../../stores/providerStore';
+import { logEvent } from '../../../stores/logStore';
 import type {
   ProviderType,
   AuthMethod,
   ProviderConfig,
   CreateProviderRequest,
   UpdateProviderRequest,
-} from '../types/provider';
+} from '../../../types/provider';
 import {
   PROVIDER_DEFAULT_COLORS,
   PROVIDER_TYPE_LABELS,
   PROVIDER_AUTH_METHODS,
   PROVIDER_DEFAULT_AUTH,
-} from '../types/provider';
+} from '../../../types/provider';
 
 const PROVIDER_TYPES: ProviderType[] = ['openai', 'anthropic', 'gemini', 'local', 'chatgpt_web'];
 

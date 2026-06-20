@@ -20,15 +20,15 @@ import {
   Settings2,
   Plus,
 } from 'lucide-react';
-import type { Node } from '../types/graph';
-import { useProviderStore } from '../stores/providerStore';
-import { PROVIDER_TYPE_LABELS } from '../types/provider';
+import type { Node } from '../../../types/graph';
+import { useProviderStore } from '../../../stores/providerStore';
+import { PROVIDER_TYPE_LABELS } from '../../../types/provider';
 import { LLMNodeContent } from './LLMNodeContent';
 import { DynamicNodeView } from './DynamicNodeView';
-import { useGraphExecution } from '../hooks/useGraphExecution';
-import { useNodeTypesStore } from '../stores/nodeTypesStore';
-import { logEvent } from '../stores/logStore';
-import { api } from '../services/api';
+import { useGraphExecution } from '../../../hooks/useGraphExecution';
+import { useNodeTypesStore } from '../../../stores/nodeTypesStore';
+import { logEvent } from '../../../stores/logStore';
+import { api } from '../../../services/api';
 
 // ─── Types ───────────────────────────────────────────────────────────
 

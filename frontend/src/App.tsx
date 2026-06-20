@@ -4,7 +4,7 @@
  * Renders the MindFlow Canvas interface with error boundary
  */
 
-import { Canvas } from './components/Canvas';
+import { Canvas } from './features/canvas/components/Canvas';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './App.css';
 

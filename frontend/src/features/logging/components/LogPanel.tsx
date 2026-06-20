@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import { ChevronDown, ChevronUp, Trash2, Terminal } from 'lucide-react';
-import { useLogStore, type LogEntry, type LogLevel } from '../stores/logStore';
+import { useLogStore, type LogEntry, type LogLevel } from '../../../stores/logStore';
 
 
 const LEVEL_COLORS: Record<LogLevel, { fg: string; bg: string; chip: string }> = {

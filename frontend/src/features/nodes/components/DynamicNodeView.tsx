@@ -12,7 +12,7 @@
  */
 
 import React from 'react';
-import type { InputSpec, NodeTypeDefinition } from '../types/plugin';
+import type { InputSpec, NodeTypeDefinition } from '../../../types/plugin';
 
 interface DynamicNodeViewProps {
   nodeTypeDef: NodeTypeDefinition;

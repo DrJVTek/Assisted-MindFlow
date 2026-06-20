@@ -8,11 +8,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Moon, Sun, Grid3x3, Map, Brain, Eye, Save, Plug, Package } from 'lucide-react';
-import { useCanvasStore } from '../stores/canvasStore';
+import { useCanvasStore } from '../../../stores/canvasStore';
 // OAuthLoginButton removed — OAuth is now inline per-provider in ProviderSettingsPanel
-import { ProviderSettingsPanel } from './ProviderSettingsPanel';
-import { MCPConnectionsPanel } from './MCPConnectionsPanel';
-import { PluginManagerPanel } from './PluginManagerPanel';
+import { ProviderSettingsPanel } from '../../providers/components/ProviderSettingsPanel';
+import { MCPConnectionsPanel } from '../../mcp/components/MCPConnectionsPanel';
+import { PluginManagerPanel } from '../../plugins/components/PluginManagerPanel';
 
 interface SettingsPanelProps {
   onClose: () => void;

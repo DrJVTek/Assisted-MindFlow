@@ -14,7 +14,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, Download, MessageSquare, ChevronRight, Loader2, GitBranch, ArrowLeft, User, Bot, Copy, AlertCircle, ClipboardPaste, Check, Archive, FolderOpen } from 'lucide-react';
-import { api } from '../services/api';
+import { api } from '../../../services/api';
 
 type BrowseTab = 'projects' | 'conversations' | 'archived';
 

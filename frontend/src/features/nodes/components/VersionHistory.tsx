@@ -21,8 +21,8 @@ import {
   ChevronRight,
   ChevronDown,
 } from 'lucide-react';
-import type { NodeVersion, TriggerReason } from '../types/graph';
-import api from '../services/api';
+import type { NodeVersion, TriggerReason } from '../../../types/graph';
+import api from '../../../services/api';
 
 interface VersionHistoryProps {
   graphId: string;

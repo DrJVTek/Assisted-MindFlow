@@ -12,7 +12,7 @@
 
 import { useCallback } from 'react';
 import type { Connection, Node as ReactFlowNode } from 'reactflow';
-import { useNodeTypesStore } from '../stores/nodeTypesStore';
+import { useNodeTypesStore } from '../../../stores/nodeTypesStore';
 
 /**
  * Implicit conversions matching backend types.py IMPLICIT_CONVERSIONS.

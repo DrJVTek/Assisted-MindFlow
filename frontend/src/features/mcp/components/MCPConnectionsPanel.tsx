@@ -10,8 +10,8 @@
 
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, RefreshCw, Check, AlertCircle, Loader2, Plug, Terminal, Globe } from 'lucide-react';
-import { useMCPStore } from '../stores/mcpStore';
-import type { TransportType, CreateMCPConnectionRequest } from '../types/mcp';
+import { useMCPStore } from '../../../stores/mcpStore';
+import type { TransportType, CreateMCPConnectionRequest } from '../../../types/mcp';
 
 const TRANSPORT_LABELS: Record<TransportType, string> = {
   stdio: 'Stdio (Local)',

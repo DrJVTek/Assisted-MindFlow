@@ -9,9 +9,9 @@
 
 import React, { useState, useCallback } from 'react';
 import { Save } from 'lucide-react';
-import type { Node as GraphNode, NodeType, NodeStatus } from '../types/graph';
-import { Dialog } from './ui/Dialog';
-import { Button } from './ui/Button';
+import type { Node as GraphNode, NodeType, NodeStatus } from '../../../types/graph';
+import { Dialog } from '../../../components/ui/Dialog';
+import { Button } from '../../../components/ui/Button';
 
 interface NodeEditorProps {
   node: GraphNode;

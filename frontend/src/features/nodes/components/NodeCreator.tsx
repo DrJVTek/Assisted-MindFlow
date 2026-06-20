@@ -8,8 +8,8 @@
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Search, ChevronRight, X } from 'lucide-react';
-import { useNodeTypes } from '../hooks/useNodeTypes';
-import type { NodeTypeDefinition } from '../types/plugin';
+import { useNodeTypes } from '../../../hooks/useNodeTypes';
+import type { NodeTypeDefinition } from '../../../types/plugin';
 
 export interface NodeCreatorProps {
   onClose: () => void;

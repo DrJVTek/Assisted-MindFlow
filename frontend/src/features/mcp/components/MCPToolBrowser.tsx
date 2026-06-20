@@ -9,8 +9,8 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { Search, Wrench, ChevronDown, ChevronRight, Check } from 'lucide-react';
-import { useMCPStore } from '../stores/mcpStore';
-import type { MCPToolWithSource } from '../types/mcp';
+import { useMCPStore } from '../../../stores/mcpStore';
+import type { MCPToolWithSource } from '../../../types/mcp';
 
 interface MCPToolBrowserProps {
   /** Currently selected tool names */

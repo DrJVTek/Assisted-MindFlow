@@ -10,8 +10,8 @@
 
 import { useState } from 'react';
 import { Play, Square, RotateCcw, Loader2, MessageSquare } from 'lucide-react';
-import { useDebateStore } from '../stores/debateStore';
-import type { DebateStatus } from '../types/debate';
+import { useDebateStore } from '../../../stores/debateStore';
+import type { DebateStatus } from '../../../types/debate';
 
 interface DebateControlsProps {
   graphId: string;

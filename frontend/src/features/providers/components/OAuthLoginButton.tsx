@@ -10,7 +10,7 @@
 
 import { useEffect, useRef } from 'react';
 import { LogIn, LogOut, Loader2, AlertTriangle } from 'lucide-react';
-import { useAuthStore } from '../stores/authStore';
+import { useAuthStore } from '../../../stores/authStore';
 
 export function OAuthLoginButton() {
   const { status, subscriptionTier, userEmail, isLoggingIn, error, needsReauth, deviceCode, login, logout, clearError, fetchStatus, startDeviceCode } =

@@ -7,9 +7,9 @@
 
 import { useEffect, useState } from 'react';
 import { ChevronDown, Loader2 } from 'lucide-react';
-import { useProviderStore } from '../stores/providerStore';
-import type { ModelInfo } from '../types/provider';
-import { PROVIDER_TYPE_LABELS } from '../types/provider';
+import { useProviderStore } from '../../../stores/providerStore';
+import type { ModelInfo } from '../../../types/provider';
+import { PROVIDER_TYPE_LABELS } from '../../../types/provider';
 
 interface ProviderSelectorProps {
   /** Currently selected provider ID (null = no provider / default) */

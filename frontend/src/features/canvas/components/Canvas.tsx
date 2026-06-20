@@ -28,36 +28,36 @@ import ReactFlow, {
 import { Settings, RefreshCw, Undo, Redo } from 'lucide-react';
 import 'reactflow/dist/style.css';
 
-import { useCanvasStore } from '../stores/canvasStore';
-import { useNodeTypesStore } from '../stores/nodeTypesStore';
-import { useProviderStore } from '../stores/providerStore';
-import { useExecutionStore } from '../stores/executionStore';
-import { logEvent } from '../stores/logStore';
-import { useGraphData } from '../features/canvas/hooks/useGraphData';
-import { useViewport } from '../features/canvas/hooks/useViewport';
-import { useLayout } from '../features/canvas/hooks/useLayout';
-import { transformGraphToReactFlow, transformNode, visualNodeToReactFlowNode } from '../features/canvas/utils/transform';
+import { useCanvasStore } from '../../../stores/canvasStore';
+import { useNodeTypesStore } from '../../../stores/nodeTypesStore';
+import { useProviderStore } from '../../../stores/providerStore';
+import { useExecutionStore } from '../../../stores/executionStore';
+import { logEvent } from '../../../stores/logStore';
+import { useGraphData } from '../hooks/useGraphData';
+import { useViewport } from '../hooks/useViewport';
+import { useLayout } from '../hooks/useLayout';
+import { transformGraphToReactFlow, transformNode, visualNodeToReactFlowNode } from '../utils/transform';
 import { useConnectionValidator } from './ConnectionValidator';
-import { MIN_ZOOM, MAX_ZOOM, formatZoomPercentage } from '../features/canvas/utils/viewport';
-import { CustomNode } from './Node';
-import { GroupNode } from './GroupNode';
-import { CommentNode } from './CommentNode';
-import { SettingsPanel } from './SettingsPanel';
+import { MIN_ZOOM, MAX_ZOOM, formatZoomPercentage } from '../utils/viewport';
+import { CustomNode } from '../../nodes/components/Node';
+import { GroupNode } from '../../nodes/components/GroupNode';
+import { CommentNode } from '../../nodes/components/CommentNode';
+import { SettingsPanel } from '../../settings/components/SettingsPanel';
 import { ContextMenu } from './ContextMenu';
-import { NodeCreator } from './NodeCreator';
-import { NodeEditor } from './NodeEditor';
-import { VersionHistory } from './VersionHistory';
-import { DebateControls } from './DebateControls';
-import { ImportConversationDialog } from './ImportConversationDialog';
-import { LogPanel } from './LogPanel';
-import { CanvasNavigator } from '../features/canvas/components/CanvasNavigator';
-import { api } from '../services/api';
+import { NodeCreator } from '../../nodes/components/NodeCreator';
+import { NodeEditor } from '../../nodes/components/NodeEditor';
+import { VersionHistory } from '../../nodes/components/VersionHistory';
+import { DebateControls } from '../../debate/components/DebateControls';
+import { ImportConversationDialog } from '../../import/components/ImportConversationDialog';
+import { LogPanel } from '../../logging/components/LogPanel';
+import { CanvasNavigator } from './CanvasNavigator';
+import { api } from '../../../services/api';
 
 // Type for context menu (defined here to avoid import issues)
 type ContextMenuType = 'canvas' | 'node' | 'group';
 
 // Lazy load DetailPanel for better performance
-const DetailPanel = lazy(() => import('./DetailPanel').then(module => ({ default: module.DetailPanel })));
+const DetailPanel = lazy(() => import('../../nodes/components/DetailPanel').then(module => ({ default: module.DetailPanel })));
 
 // Register custom node types — module-level for stable reference.
 // Also memoized inside CanvasInner as a safety net against HMR re-execution.

@@ -9,12 +9,14 @@ from unittest.mock import patch
 from mindflow.models.oauth_session import OAuthSession
 from mindflow.services.token_storage import TokenStorage
 
+PROVIDER_ID = "openai"
+
 
 @pytest.fixture
 def tmp_storage(tmp_path: Path) -> TokenStorage:
     """Create a TokenStorage with temp paths."""
     return TokenStorage(
-        session_path=tmp_path / "session.enc",
+        oauth_dir=tmp_path,
         salt_path=tmp_path / ".salt",
     )
 
@@ -36,8 +38,8 @@ class TestTokenStorageRoundTrip:
     """Test encrypt/decrypt round-trip."""
 
     def test_save_and_load_session(self, tmp_storage: TokenStorage, sample_session: OAuthSession):
-        tmp_storage.save_session(sample_session)
-        loaded = tmp_storage.load_session()
+        tmp_storage.save_session(sample_session, PROVIDER_ID)
+        loaded = tmp_storage.load_session(PROVIDER_ID)
 
         assert loaded is not None
         assert loaded.access_token == sample_session.access_token
@@ -47,8 +49,8 @@ class TestTokenStorageRoundTrip:
         assert loaded.token_type == "Bearer"
 
     def test_round_trip_preserves_all_fields(self, tmp_storage: TokenStorage, sample_session: OAuthSession):
-        tmp_storage.save_session(sample_session)
-        loaded = tmp_storage.load_session()
+        tmp_storage.save_session(sample_session, PROVIDER_ID)
+        loaded = tmp_storage.load_session(PROVIDER_ID)
 
         assert loaded is not None
         original = sample_session.to_storage_dict()
@@ -63,15 +65,15 @@ class TestSaltGeneration:
         salt_path = tmp_storage._salt_path
         assert not salt_path.exists()
 
-        tmp_storage.save_session(sample_session)
+        tmp_storage.save_session(sample_session, PROVIDER_ID)
         assert salt_path.exists()
         assert len(salt_path.read_bytes()) == 32
 
     def test_salt_reused_on_subsequent_saves(self, tmp_storage: TokenStorage, sample_session: OAuthSession):
-        tmp_storage.save_session(sample_session)
+        tmp_storage.save_session(sample_session, PROVIDER_ID)
         salt1 = tmp_storage._salt_path.read_bytes()
 
-        tmp_storage.save_session(sample_session)
+        tmp_storage.save_session(sample_session, PROVIDER_ID)
         salt2 = tmp_storage._salt_path.read_bytes()
 
         assert salt1 == salt2
@@ -81,63 +83,64 @@ class TestMissingFile:
     """Test missing file handling."""
 
     def test_load_returns_none_when_no_session(self, tmp_storage: TokenStorage):
-        assert tmp_storage.load_session() is None
+        assert tmp_storage.load_session(PROVIDER_ID) is None
 
     def test_has_session_false_when_no_file(self, tmp_storage: TokenStorage):
-        assert tmp_storage.has_session() is False
+        assert tmp_storage.has_session(PROVIDER_ID) is False
 
     def test_has_session_true_after_save(self, tmp_storage: TokenStorage, sample_session: OAuthSession):
-        tmp_storage.save_session(sample_session)
-        assert tmp_storage.has_session() is True
+        tmp_storage.save_session(sample_session, PROVIDER_ID)
+        assert tmp_storage.has_session(PROVIDER_ID) is True
 
     def test_delete_returns_false_when_no_file(self, tmp_storage: TokenStorage):
-        assert tmp_storage.delete_session() is False
+        assert tmp_storage.delete_session(PROVIDER_ID) is False
 
 
 class TestCorruptedFile:
     """Test corrupted file handling."""
 
     def test_load_returns_none_for_garbage_data(self, tmp_storage: TokenStorage, sample_session: OAuthSession):
-        tmp_storage.save_session(sample_session)
-        tmp_storage._session_path.write_bytes(b"not-encrypted-data")
+        tmp_storage.save_session(sample_session, PROVIDER_ID)
+        tmp_storage._session_path_for(PROVIDER_ID).write_bytes(b"not-encrypted-data")
 
-        assert tmp_storage.load_session() is None
+        assert tmp_storage.load_session(PROVIDER_ID) is None
 
     def test_load_returns_none_for_wrong_key(self, tmp_path: Path, sample_session: OAuthSession):
         storage1 = TokenStorage(
-            session_path=tmp_path / "session.enc",
+            oauth_dir=tmp_path,
             salt_path=tmp_path / ".salt1",
         )
-        storage1.save_session(sample_session)
+        storage1.save_session(sample_session, PROVIDER_ID)
 
         storage2 = TokenStorage(
-            session_path=tmp_path / "session.enc",
+            oauth_dir=tmp_path,
             salt_path=tmp_path / ".salt2",
         )
-        assert storage2.load_session() is None
+        assert storage2.load_session(PROVIDER_ID) is None
 
     def test_load_returns_none_for_invalid_json(self, tmp_storage: TokenStorage):
         from cryptography.fernet import Fernet
         fernet = tmp_storage._get_fernet()
         encrypted = fernet.encrypt(b"not-valid-json")
-        tmp_storage._session_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_storage._session_path.write_bytes(encrypted)
+        path = tmp_storage._session_path_for(PROVIDER_ID)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(encrypted)
 
-        assert tmp_storage.load_session() is None
+        assert tmp_storage.load_session(PROVIDER_ID) is None
 
 
 class TestDeleteSession:
     """Test session deletion."""
 
     def test_delete_removes_file(self, tmp_storage: TokenStorage, sample_session: OAuthSession):
-        tmp_storage.save_session(sample_session)
-        assert tmp_storage._session_path.exists()
+        tmp_storage.save_session(sample_session, PROVIDER_ID)
+        assert tmp_storage._session_path_for(PROVIDER_ID).exists()
 
-        result = tmp_storage.delete_session()
+        result = tmp_storage.delete_session(PROVIDER_ID)
         assert result is True
-        assert not tmp_storage._session_path.exists()
+        assert not tmp_storage._session_path_for(PROVIDER_ID).exists()
 
     def test_load_after_delete_returns_none(self, tmp_storage: TokenStorage, sample_session: OAuthSession):
-        tmp_storage.save_session(sample_session)
-        tmp_storage.delete_session()
-        assert tmp_storage.load_session() is None
+        tmp_storage.save_session(sample_session, PROVIDER_ID)
+        tmp_storage.delete_session(PROVIDER_ID)
+        assert tmp_storage.load_session(PROVIDER_ID) is None

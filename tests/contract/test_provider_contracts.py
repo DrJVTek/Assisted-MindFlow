@@ -293,8 +293,14 @@ class TestValidateProvider:
         assert data["status"] in ["connected", "disconnected", "error", "rate_limited"]
         assert "available_models" in data
 
-    def test_validate_no_instance_returns_502(self, client: TestClient, _isolated_registry):
-        """Validate returns 502 when provider instance cannot be created."""
+    def test_validate_no_instance_returns_400(self, client: TestClient, _isolated_registry):
+        """Validate returns 400 when provider has no credentials/instance.
+
+        A missing provider instance means the stored credentials are absent or
+        empty, which is a client-side error (the user must add an API key or
+        authenticate), so the endpoint returns 400 rather than 502 (502 is
+        reserved for upstream validation failures, e.g. model discovery errors).
+        """
         create_resp = client.post("/api/providers", json=_openai_payload())
         provider_id = create_resp.json()["id"]
 
@@ -305,7 +311,8 @@ class TestValidateProvider:
         ):
             resp = client.post(f"/api/providers/{provider_id}/validate")
 
-        assert resp.status_code == 502
+        assert resp.status_code == 400
+        assert "credentials" in resp.json()["detail"].lower()
 
 
 # ── Credential hiding (cross-cutting) ──────────────────────────────

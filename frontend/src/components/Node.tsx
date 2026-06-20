@@ -12,7 +12,7 @@
  * where the canvas is the conversation map and the panel is the workspace.
  */
 
-import React, { memo, useMemo, useCallback } from 'react';
+import React, { memo, useMemo, useCallback, useState } from 'react';
 import { Handle, Position } from 'reactflow';
 import { Bot, User, Wrench, Loader, Check, AlertCircle, Play, Square } from 'lucide-react';
 import type { NodeType, NodeAuthor, NodeStatus } from '../types/graph';
@@ -99,6 +99,8 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
     llm_status,
     llm_response,
   } = data;
+
+  const [hovered, setHovered] = useState(false);
 
   const provider = useProviderStore((s) =>
     provider_id ? s.providers.find((p) => p.id === provider_id) : undefined
@@ -236,20 +238,24 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
   return (
     <div
       className={`mindflow-node${isExecuting ? ' mindflow-node--executing' : ''}${isComplete ? ' mindflow-node--complete' : ''}${isError ? ' mindflow-node--error' : ''}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         backgroundColor: 'var(--node-bg)',
-        borderColor: selected ? 'var(--primary-color)' : isExecuting ? 'var(--primary-color)' : isError ? 'var(--danger-color)' : isComplete ? 'var(--success-color)' : 'var(--node-border)',
+        borderColor: selected ? 'var(--primary-color)' : isExecuting ? 'var(--primary-color)' : isError ? 'var(--danger-color)' : isComplete ? 'var(--success-color)' : hovered ? 'var(--primary-color)' : 'var(--node-border)',
         borderWidth: selected ? 2 : 1,
         borderStyle: 'solid',
-        borderRadius: '6px',
+        borderRadius: 'var(--radius-sm)',
         width: 260,
         minHeight: nodeMinHeight,
         opacity,
         boxShadow: selected
-          ? '0 0 0 1px #4FC3F7, 0 4px 12px rgba(79, 195, 247, 0.2)'
+          ? '0 0 0 1px var(--primary-color), var(--shadow-md)'
           : isExecuting
             ? '0 0 8px rgba(33, 150, 243, 0.4)'
-            : '0 2px 6px rgba(0, 0, 0, 0.2)',
+            : hovered
+              ? 'var(--shadow-md)'
+              : 'var(--shadow-sm)',
         transition: 'border-color 0.15s, box-shadow 0.15s',
         cursor: 'pointer',
         fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -307,7 +313,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
       <div
         style={{
           background: headerColor,
-          padding: '4px 10px',
+          padding: '6px 10px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -323,8 +329,9 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
           {isError && <AlertCircle size={11} style={{ color: 'rgba(255,255,255,0.9)' }} />}
 
           <span style={{
-            fontSize: '11px',
+            fontSize: '12px',
             fontWeight: 600,
+            letterSpacing: '0.01em',
             color: 'white',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -395,14 +402,14 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
 
       {/* ── Port labels + Content preview ──────────────────────── */}
       {!isZoomedOut && (
-        <div style={{ padding: '4px 8px 6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        <div style={{ padding: '6px 8px 8px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
           {/* Port labels row */}
           {(allInputPorts.length > 0 || outputPorts.length > 0) && (
             <div style={{ display: 'flex', justifyContent: 'space-between', minHeight: portsHeight }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
                 {allInputPorts.map(p => (
                   <span key={p.name} style={{
-                    fontSize: '8px', color: 'var(--node-text-muted)', lineHeight: `${PORT_H}px`,
+                    fontSize: '9px', color: 'var(--node-text-muted)', lineHeight: `${PORT_H}px`,
                     display: 'flex', alignItems: 'center', gap: '3px',
                   }}>
                     <span style={{ width: 5, height: 5, borderRadius: '50%', backgroundColor: p.color, display: 'inline-block' }} />
@@ -413,7 +420,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', alignItems: 'flex-end' }}>
                 {outputPorts.map(p => (
                   <span key={p.name} style={{
-                    fontSize: '8px', color: 'var(--node-text-muted)', lineHeight: `${PORT_H}px`,
+                    fontSize: '9px', color: 'var(--node-text-muted)', lineHeight: `${PORT_H}px`,
                     display: 'flex', alignItems: 'center', gap: '3px', flexDirection: 'row-reverse',
                   }}>
                     <span style={{ width: 5, height: 5, borderRadius: '50%', backgroundColor: p.color, display: 'inline-block' }} />
@@ -433,7 +440,7 @@ export const CustomNode = memo(({ data, selected }: CustomNodeProps) => {
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
               borderTop: '1px solid var(--node-border)',
-              paddingTop: '3px',
+              paddingTop: 'var(--spacing-xs)',
               marginTop: '2px',
             }}>
               {contentPreview}

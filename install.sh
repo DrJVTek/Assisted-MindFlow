@@ -44,7 +44,7 @@ echo ""
 echo "[4/5] Installing Python dependencies..."
 source venv/bin/activate
 pip install --upgrade pip
-pip install -e .
+pip install -e ".[dev]"
 
 echo "Python dependencies installed successfully"
 

@@ -5,6 +5,7 @@ This module provides REST API endpoints for the interactive node canvas interfac
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,10 +16,39 @@ from mindflow.plugins.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
 
+def _build_plugin_registry() -> PluginRegistry:
+    """Discover and load all node-type plugins. The single place this happens."""
+    project_root = Path(__file__).resolve().parents[3]
+    plugin_dirs = [
+        str(project_root / "plugins" / "core"),
+        str(project_root / "plugins" / "community"),
+    ]
+    registry = PluginRegistry(plugin_dirs)
+    registry.discover_and_load()
+    return registry
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Composition root: build registries and wire them once at startup."""
+    registry = _build_plugin_registry()
+    node_types.set_plugin_registry(registry)
+    # Eagerly build the provider registry singleton so it's ready on first request.
+    from mindflow.api.routes.providers import _get_registry
+    _get_registry()
+    logger.info(
+        "Plugin system ready: %d plugins, %d node types",
+        len(registry.plugins),
+        len(registry.node_classes),
+    )
+    yield
+
+
 app = FastAPI(
     title="MindFlow Canvas API",
     description="REST API for the Interactive Node Canvas Interface",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Configure CORS based on environment
@@ -60,32 +90,6 @@ app.include_router(node_types.router, prefix="/api")
 app.include_router(execution.router, prefix="/api")
 app.include_router(composites.router, prefix="/api")
 app.include_router(plugins_route.router, prefix="/api")
-
-
-# ── Plugin system startup ──────────────────────────────────────
-@app.on_event("startup")
-async def _load_plugins() -> None:
-    """Discover and load all plugins at server startup."""
-    # Resolve plugin directories relative to project root
-    project_root = Path(__file__).resolve().parents[3]
-    plugin_dirs = [
-        str(project_root / "plugins" / "core"),
-        str(project_root / "plugins" / "community"),
-    ]
-
-    registry = PluginRegistry(plugin_dirs)
-    registry.discover_and_load()
-
-    # Wire into the node_types API route
-    node_types.set_plugin_registry(registry)
-
-    loaded_count = len(registry.node_classes)
-    plugin_count = len(registry.plugins)
-    logger.info(
-        "Plugin system ready: %d plugins, %d node types",
-        plugin_count,
-        loaded_count,
-    )
 
 
 @app.get("/")

@@ -1,6 +1,10 @@
-"""Tests: graph execution engine — topological sort, cycle detection, error propagation."""
+"""Tests: graph execution engine — topological sort and cycle detection.
 
-import asyncio
+(Node execution + parent-failure propagation are tested via the Orchestrator
+in tests/backend/unit/test_orchestrator.py — GraphExecutor is now a pure
+topology utility.)
+"""
+
 from uuid import uuid4
 
 import pytest
@@ -97,53 +101,3 @@ class TestCycleDetection:
         executor = GraphExecutor(adjacency)
         with pytest.raises(CycleDetectedError):
             executor.topological_sort(target=a)
-
-
-class TestParentFailurePropagation:
-    """T051: Parent failure cancels downstream nodes."""
-
-    @pytest.mark.asyncio
-    async def test_parent_failure_cancels_child(self):
-        """If parent A fails, child B should be marked cancelled."""
-        a, b = uuid4(), uuid4()
-        adjacency = {
-            a: {"children": [b], "parents": []},
-            b: {"children": [], "parents": [a]},
-        }
-
-        results = {}
-
-        async def execute_a():
-            raise RuntimeError("Provider auth failed")
-
-        async def execute_b():
-            results[b] = "completed"
-
-        executor = GraphExecutor(adjacency)
-        executor.set_node_executor(a, execute_a)
-        executor.set_node_executor(b, execute_b)
-
-        exec_result = await executor.execute(target=b)
-        assert exec_result[a]["status"] == "failed"
-        assert exec_result[b]["status"] == "cancelled"
-        assert b not in results  # B never executed
-
-    @pytest.mark.asyncio
-    async def test_successful_chain(self):
-        """A→B both succeed — both marked completed."""
-        a, b = uuid4(), uuid4()
-        adjacency = {
-            a: {"children": [b], "parents": []},
-            b: {"children": [], "parents": [a]},
-        }
-
-        async def succeed():
-            return {"text": "ok"}
-
-        executor = GraphExecutor(adjacency)
-        executor.set_node_executor(a, succeed)
-        executor.set_node_executor(b, succeed)
-
-        exec_result = await executor.execute(target=b)
-        assert exec_result[a]["status"] == "completed"
-        assert exec_result[b]["status"] == "completed"

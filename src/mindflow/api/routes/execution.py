@@ -58,7 +58,6 @@ def _resolve_provider_by_type(provider_type: str):
 
 class ExecuteRequest(BaseModel):
     stream: bool = True
-    force_rerun: bool = False
 
 
 @router.post("/{graph_id}/validate")
@@ -166,47 +165,6 @@ async def execute_node(
             )
         finally:
             _active_executions.pop(execution_id, None)
-
-
-@router.post("/{graph_id}/nodes/{node_id}/mark-dirty")
-async def mark_node_dirty(graph_id: str, node_id: str) -> dict:
-    """Explicitly invalidate a node and all its descendants.
-
-    Used when the user edits node content/inputs to trigger re-execution.
-
-    Returns list of all nodes that were marked dirty.
-    """
-    try:
-        gid = UUID(graph_id)
-        nid = UUID(node_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid graph or node ID")
-
-    graph = get_graph_from_storage(gid)
-    if graph is None:
-        raise HTTPException(status_code=404, detail=f"Graph {graph_id} not found")
-
-    if nid not in graph.nodes:
-        raise HTTPException(status_code=404, detail=f"Node {node_id} not found in graph")
-
-    # Build adjacency from graph
-    from mindflow.engine.executor import GraphExecutor
-
-    adjacency: dict[UUID, dict[str, list[UUID]]] = {}
-    for n in graph.nodes.values():
-        adjacency[n.id] = {
-            "parents": list(n.parents),
-            "children": list(n.children),
-        }
-
-    executor = GraphExecutor(adjacency)
-    # All nodes start dirty — clear to simulate existing clean state
-    executor._dirty_nodes.clear()
-    dirty_list = executor.mark_dirty(nid)
-
-    return {
-        "dirty_nodes": [str(n) for n in dirty_list],
-    }
 
 
 @router.delete("/{graph_id}/execute/{execution_id}")

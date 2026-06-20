@@ -11,13 +11,13 @@ Executable task cards. Read ../CONVENTIONS.md first. Big 'vision' items (Thread 
 - [x] [Install dev extras so tests run after a fresh install (install.bat + install.sh)](be-installbat-dev-deps.md) — quick
 - [x] [Replace deprecated pydantic FieldValidationInfo with ValidationInfo](be-pydantic-deprecation.md) — quick
 - [x] [Add an automated guard that fails if engine/ imports mindflow.api](be-layering-lint.md) — quick
-- [ ] [DECISION REQUIRED: Kill or wire the dead dirty/clean cache in GraphExecutor](be-engine-cache-decision.md) — medium — ⚠ needs decision
+- [x] [Kill the dead dirty/clean cache in GraphExecutor (chose OPTION-KILL)](be-engine-cache-decision.md) — medium
 
 ## UI
 
-- [ ] [Polish canvas node visuals (typography, spacing, header, hover/selected) using CSS tokens](ui-node-refinement.md) — medium
+- [x] [Polish canvas node visuals (typography, spacing, header, hover/selected) using CSS tokens](ui-node-refinement.md) — medium
 - [ ] [Migrate flat components/ to feature folders and decompose the Canvas god-component](ui-frontend-modularization.md) — large
-- [ ] [Integrate brand: track logo assets, add favicon + app top bar](ui-branding.md) — medium
-- [ ] [Persist UI theme across reloads + optional follow-system default](ui-theme-persistence.md) — medium
+- [x] [Integrate brand: track logo assets, add favicon + app top bar](ui-branding.md) — medium
+- [x] [Persist UI theme across reloads + optional follow-system default](ui-theme-persistence.md) — medium
 - [x] [Let OpenAI providers set a custom base URL (OpenAI-compatible proxy)](ui-openai-endpoint-field.md) — quick
-- [ ] **Unbreak the frontend production build** — 20 pre-existing `tsc` errors (17 unused vars, 2 real type mismatches, 1 enum vs `erasableSyntaxOnly`); blocks every UI card's `npm run build` verify. *(discovered 2026-06-20; no card file yet)*
+- [x] **Unbreak the frontend production build** — fixed 20 pre-existing `tsc` errors (removed dead code + unused imports/vars + 1 null-coalescing fix). `npm run build` is green. *(discovered & done 2026-06-20)*

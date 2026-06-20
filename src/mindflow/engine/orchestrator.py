@@ -46,6 +46,12 @@ class Orchestrator:
         graph: The Graph object containing nodes and their connections.
         registry: PluginRegistry with loaded node classes.
         provider_resolver: Callable that resolves a provider_id to a provider instance.
+        provider_type_resolver: Callable that resolves a provider *type* string
+            (e.g. "chatgpt_web", "local") to a live provider instance, used for
+            category-based auto-resolution when a node has no explicit provider_id.
+            Injected by the API layer so the engine never imports from
+            ``mindflow.api`` (dependency inversion). When absent, category-based
+            auto-resolution simply yields no provider.
     """
 
     def __init__(
@@ -53,10 +59,12 @@ class Orchestrator:
         graph: Any,
         registry: Any,
         provider_resolver: Any = None,
+        provider_type_resolver: Any = None,
     ):
         self._graph = graph
         self._registry = registry
         self._provider_resolver = provider_resolver
+        self._provider_type_resolver = provider_type_resolver
 
         # Build adjacency for the executor
         self._adjacency: dict[UUID, dict[str, list[UUID]]] = {}
@@ -305,16 +313,12 @@ class Orchestrator:
         if plugin_provider_type == "ollama":
             plugin_provider_type = "local"
 
-        # Find matching provider in registry
-        from mindflow.api.routes.providers import _get_registry
-        provider_registry = _get_registry()
-        for p_config in provider_registry.list_providers():
-            if p_config.type.value == plugin_provider_type:
-                instance = provider_registry.get_provider_instance(str(p_config.id))
-                if instance:
-                    return instance
-
-        return None
+        # Delegate "find a live provider of this type" to the injected resolver.
+        # The engine must NOT import from mindflow.api — the API layer owns the
+        # provider registry and passes a closure over it (dependency inversion).
+        if self._provider_type_resolver is None:
+            return None
+        return self._provider_type_resolver(plugin_provider_type)
 
     async def _execute_node(self, node_id: UUID) -> dict[str, Any]:
         """Execute a single node and return its outputs as a dict.

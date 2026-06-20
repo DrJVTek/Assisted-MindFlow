@@ -39,6 +39,23 @@ def _resolve_provider(provider_id: str):
     return registry.get_provider_instance(provider_id)
 
 
+def _resolve_provider_by_type(provider_type: str):
+    """Resolve a provider *type* (e.g. "chatgpt_web", "local") to a live instance.
+
+    Used by the Orchestrator for category-based auto-resolution when a node has
+    no explicit provider_id. Lives here in the API layer so the engine never
+    imports the provider registry — dependency inversion.
+    """
+    from mindflow.api.routes.providers import _get_registry
+    registry = _get_registry()
+    for config in registry.list_providers():
+        if config.type.value == provider_type:
+            instance = registry.get_provider_instance(str(config.id))
+            if instance:
+                return instance
+    return None
+
+
 class ExecuteRequest(BaseModel):
     stream: bool = True
     force_rerun: bool = False
@@ -99,6 +116,7 @@ async def execute_node(
         graph=graph,
         registry=registry,
         provider_resolver=_resolve_provider,
+        provider_type_resolver=_resolve_provider_by_type,
     )
 
     execution_id = str(uuid4())

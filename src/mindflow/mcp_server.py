@@ -6,6 +6,10 @@ This starts the MCP server using stdio transport, which is the
 standard way for Claude Code and other MCP clients to connect.
 
 For SSE transport (HTTP-based), pass --sse flag.
+
+This module is ONLY the CLI entry point. The FastMCP instance and all tools
+live in ``mindflow.services.mcp_server`` — do not add tool definitions or
+business logic here.
 """
 
 import argparse

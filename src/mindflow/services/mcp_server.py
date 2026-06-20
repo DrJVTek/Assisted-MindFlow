@@ -24,7 +24,9 @@ from mcp.server.fastmcp import FastMCP
 from mindflow.services.canvas_service import CanvasService
 from mindflow.api.routes.graphs import (
     get_graph_from_storage,
-    add_graph_to_storage,
+    # Unused here, but kept as the patch target for
+    # tests/integration/test_mcp_server.py — do not remove.
+    add_graph_to_storage,  # noqa: F401
 )
 from mindflow.api.routes.providers import _get_registry
 from mindflow.services import debate_engine

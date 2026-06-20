@@ -194,6 +194,7 @@ export function ProviderSettingsPanel() {
   const [addColor, setAddColor] = useState(PROVIDER_DEFAULT_COLORS.openai);
   const [addApiKey, setAddApiKey] = useState('');
   const [addEndpointUrl, setAddEndpointUrl] = useState('http://localhost:11434');
+  const [addBaseUrl, setAddBaseUrl] = useState('');
   const [addModel, setAddModel] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -248,12 +249,18 @@ export function ProviderSettingsPanel() {
       }
       // OAuth: no credentials at creation time
 
+      // OpenAI-compatible proxy: optional custom base URL.
+      if (addType === 'openai' && addBaseUrl.trim()) {
+        request.endpoint_url = addBaseUrl.trim();
+      }
+
       await addProvider(request);
       logEvent('provider', 'success', `Added provider "${addName}" (${addType})`);
       setShowAddForm(false);
       setAddApiKey('');
       setAddName('');
       setAddModel('');
+      setAddBaseUrl('');
     } catch (err) {
       console.error('Failed to add provider:', err);
       logEvent('provider', 'error', `Failed to add provider "${addName}"`, (err as Error).message);
@@ -284,7 +291,7 @@ export function ProviderSettingsPanel() {
       if (editColor !== provider.color) request.color = editColor;
       if (editModel !== (provider.selected_model || '')) request.selected_model = editModel;
       if (editApiKey) request.api_key = editApiKey;
-      if (provider.auth_method === 'endpoint' && editEndpointUrl !== (provider.endpoint_url || '')) {
+      if ((provider.auth_method === 'endpoint' || provider.type === 'openai') && editEndpointUrl !== (provider.endpoint_url || '')) {
         request.endpoint_url = editEndpointUrl;
       }
 
@@ -520,6 +527,18 @@ export function ProviderSettingsPanel() {
                         />
                       </div>
                     )}
+                    {provider.type === 'openai' && (
+                      <div>
+                        <label style={labelStyle}>Custom base URL (advanced)</label>
+                        <input
+                          type="text"
+                          value={editEndpointUrl}
+                          onChange={e => setEditEndpointUrl(e.target.value)}
+                          placeholder="https://my-proxy.example.com/v1 (empty = api.openai.com)"
+                          style={inputStyle}
+                        />
+                      </div>
+                    )}
                     {provider.auth_method === 'api_key' && (
                       <div>
                         <label style={labelStyle}>API Key (leave empty to keep current)</label>
@@ -705,6 +724,21 @@ export function ProviderSettingsPanel() {
                 style={inputStyle}
                 placeholder="sk-..."
               />
+            </div>
+          )}
+          {addType === 'openai' && (
+            <div>
+              <label style={labelStyle}>Custom base URL (advanced)</label>
+              <input
+                type="text"
+                value={addBaseUrl}
+                onChange={e => setAddBaseUrl(e.target.value)}
+                style={inputStyle}
+                placeholder="https://my-proxy.example.com/v1 (leave empty for api.openai.com)"
+              />
+              <div style={{ fontSize: '11px', color: 'var(--node-text-muted)', marginTop: '4px' }}>
+                Point at an OpenAI-compatible proxy. Leave empty to use the default OpenAI API.
+              </div>
             </div>
           )}
           {addAuthMethod === 'oauth' && (

@@ -2,8 +2,10 @@
  * TypeScript types for MindFlow Graph entities (based on Python backend models)
  */
 
-// Re-export UUID from dedicated file
-export type { UUID } from './uuid';
+// Import UUID for use in this module's own types, and re-export it so
+// consumers can keep importing UUID from here too.
+import type { UUID } from './uuid';
+export type { UUID };
 
 // Legacy node types kept for backward compatibility.
 // New nodes use class_type (string) from the plugin system.

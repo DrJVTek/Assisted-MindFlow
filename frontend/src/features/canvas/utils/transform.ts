@@ -6,6 +6,7 @@
 import type { Graph, Node } from '../../../types/graph';
 import type { VisualNode, ConnectionLine } from '../../../types/canvas';
 import { getNodeStyle } from './styling';
+import { useNodeTypesStore } from '../../../stores/nodeTypesStore';
 
 /**
  * Fixed node dimensions (from data-model.md)
@@ -73,7 +74,8 @@ export function transformNodesToVisual(
  */
 export function createConnectionLine(
   parentId: string,
-  childId: string
+  childId: string,
+  stroke: string = '#64748b'
 ): ConnectionLine {
   return {
     id: `${parentId}-${childId}`,
@@ -81,13 +83,42 @@ export function createConnectionLine(
     target: childId,
     path: '', // React Flow auto-generates path
     style: {
-      stroke: '#90A4AE', // Default grey
+      stroke,
       strokeWidth: 2,
-      opacity: 0.6,
+      opacity: 0.85,
       animated: false,
     },
     markerEnd: 'url(#arrow)',
   };
+}
+
+/**
+ * Resolve an edge's color from the SOURCE node's output port type, so links
+ * are tinted by data type like ComfyUI. Falls back to a neutral slate when
+ * the node-type metadata hasn't loaded yet (graceful, never throws).
+ */
+function resolveOutputColor(
+  sourceNode: Node | undefined,
+  outputName: string | undefined
+): string {
+  const fallback = '#64748b'; // slate-500
+  if (!sourceNode || !outputName) return fallback;
+  try {
+    const store = useNodeTypesStore.getState();
+    const classType = (sourceNode as any).class_type || sourceNode.type;
+    const def = classType ? store.nodeTypes[classType] : undefined;
+    if (def) {
+      const names = (def as any).return_names || [];
+      const types = (def as any).return_types || [];
+      const idx = names.indexOf(outputName);
+      if (idx >= 0 && types[idx]) {
+        return store.getTypeColor(types[idx]) || fallback;
+      }
+    }
+  } catch {
+    // node-type store not ready — neutral fallback
+  }
+  return fallback;
 }
 
 /**
@@ -107,7 +138,8 @@ export function transformNodesToConnections(
     if (!node.connections) return;
     for (const [inputName, connSpec] of Object.entries(node.connections)) {
       if (connSpec && connSpec.source_node_id) {
-        const conn = createConnectionLine(connSpec.source_node_id, node.id);
+        const stroke = resolveOutputColor(nodes[connSpec.source_node_id], connSpec.output_name);
+        const conn = createConnectionLine(connSpec.source_node_id, node.id, stroke);
         conn.id = `${connSpec.source_node_id}:${connSpec.output_name}-${node.id}:${inputName}`;
         (conn as any).sourceHandle = connSpec.output_name;
         (conn as any).targetHandle = inputName;
@@ -215,7 +247,7 @@ export function connectionLineToReactFlowEdge(connection: ConnectionLine): any {
     id: connection.id,
     source: connection.source,
     target: connection.target,
-    type: 'smoothstep',
+    type: 'default',
     style: {
       stroke: connection.style.stroke,
       strokeWidth: connection.style.strokeWidth,

@@ -2,6 +2,9 @@
 
 > Master checklist across cleanup, UI, and vision. Backend cleanup detail lives in
 > [`architecture/foundation-cleanup-plan.md`](architecture/foundation-cleanup-plan.md).
+> **New here? Read [`CONVENTIONS.md`](CONVENTIONS.md) first.** Executable, self-contained task cards
+> for the well-scoped items live in [`tasks/`](tasks/README.md) — each has exact paths, steps,
+> acceptance criteria, and verify commands.
 > Effort: ⚡ quick · ◐ medium · ⛰ large.  ·  Last updated: 2026-06-20 · Branch: `015-foundation-cleanup`
 
 ## ✅ Shipped this session (branch 015)

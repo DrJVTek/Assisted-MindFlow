@@ -349,7 +349,7 @@ class TestCorePluginDiscovery:
         """All core plugins with satisfied dependencies load correctly."""
         from pathlib import Path
 
-        root = Path(__file__).resolve().parents[3]
+        root = Path(__file__).resolve().parents[2]
         core_dir = str(root / "plugins" / "core")
 
         registry = PluginRegistry([core_dir])

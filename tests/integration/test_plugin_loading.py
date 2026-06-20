@@ -7,7 +7,7 @@ from mindflow.plugins.registry import PluginRegistry
 
 
 # Path to the actual core plugins
-CORE_PLUGINS_DIR = str(Path(__file__).resolve().parents[3] / "plugins" / "core")
+CORE_PLUGINS_DIR = str(Path(__file__).resolve().parents[2] / "plugins" / "core")
 
 
 class TestCorePluginDiscovery:

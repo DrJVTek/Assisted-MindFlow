@@ -277,7 +277,7 @@ class TestGetProviderInstance:
 
         result = registry.get_provider_instance(str(config.id))
         assert result is not None
-        mock_openai_cls.assert_called_once_with(api_key="sk-key")
+        mock_openai_cls.assert_called_once_with(api_key="sk-key", base_url=None)
 
     @patch("mindflow.providers.anthropic.AnthropicProvider")
     def test_creates_anthropic_provider(self, mock_anthropic_cls, registry):
@@ -310,7 +310,7 @@ class TestGetProviderInstance:
 
         result = registry.get_provider_instance(str(config.id))
         assert result is not None
-        mock_ollama_cls.assert_called_once_with(endpoint_url="http://localhost:11434")
+        mock_ollama_cls.assert_called_once_with(base_url="http://localhost:11434")
 
     @patch("mindflow.providers.gemini.GeminiProvider")
     def test_creates_gemini_provider(self, mock_gemini_cls, registry):

@@ -163,10 +163,14 @@ class TestNode:
             node = Node(type=node_type, author="human", content="Test")
             assert node.type == node_type
 
-    def test_node_invalid_type(self) -> None:
-        """Test invalid node type raises ValidationError."""
-        with pytest.raises(ValidationError):
-            Node(type="invalid_type", author="human", content="Test")  # type: ignore
+    def test_node_accepts_dynamic_plugin_type(self) -> None:
+        """Plugin node types are arbitrary strings (Feature 014).
+
+        NodeType was widened from a closed Literal[...] to `str` so that
+        dynamic plugin class_types (e.g. 'openai_chat') are accepted.
+        """
+        node = Node(type="openai_chat", author="human", content="Test")
+        assert node.type == "openai_chat"
 
     def test_node_author_validation(self) -> None:
         """Test all valid authors are accepted."""
@@ -181,12 +185,13 @@ class TestNode:
         with pytest.raises(ValidationError):
             Node(type="note", author="robot", content="Test")  # type: ignore
 
-    def test_content_min_length(self) -> None:
-        """Test content must be at least 1 character."""
-        with pytest.raises(ValidationError) as exc_info:
-            Node(type="note", author="human", content="")
+    def test_content_allows_empty(self) -> None:
+        """Empty content is allowed (Feature 014).
 
-        assert "at least 1 character" in str(exc_info.value)
+        content min_length is 0 so plugin nodes can start blank.
+        """
+        node = Node(type="note", author="human", content="")
+        assert node.content == ""
 
     def test_content_max_length(self) -> None:
         """Test content cannot exceed 10000 characters."""

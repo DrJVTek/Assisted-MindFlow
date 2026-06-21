@@ -5,7 +5,6 @@ and metadata for a reasoning graph.
 """
 
 from datetime import UTC, datetime
-from enum import Enum
 from typing import Dict, Optional
 from uuid import UUID, uuid4
 
@@ -14,31 +13,6 @@ from pydantic import BaseModel, Field
 from mindflow.models.node import Node
 from mindflow.models.group import Group
 from mindflow.models.comment import Comment
-
-
-class NodeExecutionState(str, Enum):
-    """Execution caching state for dirty/clean tracking.
-
-    Tracks the dirty/clean cache state of a node independently from the
-    LLM streaming lifecycle field on Node (llm_status).
-    This enum tracks whether a node's cached output is still valid.
-
-    State Transitions:
-        DIRTY → EXECUTING → CLEAN
-                    ↓
-                 FAILED → DIRTY (retry via mark_dirty)
-
-    Dirty Propagation:
-        - User edits node content/inputs → mark DIRTY
-        - Node marked DIRTY → all descendants become DIRTY
-        - Node execution completes → mark CLEAN, store output in cache
-        - Node execution fails → mark FAILED, skip downstream
-    """
-
-    DIRTY = "dirty"
-    CLEAN = "clean"
-    EXECUTING = "executing"
-    FAILED = "failed"
 
 
 class GraphMetadata(BaseModel):

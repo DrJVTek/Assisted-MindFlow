@@ -1,8 +1,11 @@
 # Foundation Cleanup Plan — Branch `015-foundation-cleanup`
 
-> Working reference for the modular cleanup of Assisted MindFlow.
+> **STATUS: CLEANUP COMPLETE** — every phase below shipped on branch `015` (PR #1).
+> This document is kept as the historical working plan: §2 "Current architecture" and
+> §4 "Confirmed technical debt" describe the **pre-cleanup** state that motivated the work
+> (e.g. the old flat `services/mcp_server.py` layout). For the CURRENT layout and conventions,
+> read [`../CONVENTIONS.md`](../CONVENTIONS.md); for remaining work, [`../ROADMAP.md`](../ROADMAP.md).
 > Status legend: ✅ done & solid · 🟡 embryonic / partial · ❌ missing · 🧹 cleanup target
-> Last grounded against code: branch `015-foundation-cleanup`.
 
 ## 1. What MindFlow is (the vision, in one paragraph)
 

@@ -9,8 +9,8 @@
 Backend and frontend are separate processes. **Use the `venv\` virtualenv** (NOT `.venv\`).
 
 ```bash
-# One-time install (Windows). NOTE: install.bat runs `pip install -e .` WITHOUT [dev];
-# to run tests you must also install dev deps (see §2).
+# One-time install (Windows). install.bat installs `-e .[dev]` (dev extras included,
+# so tests run out of the box).
 install.bat                 # or: python -m venv venv && venv\Scripts\pip install -e .[dev]
                             # + cd frontend && npm install
 
@@ -30,7 +30,8 @@ restart.bat                 # Windows   ·   ./restart.sh  Linux
 venv\Scripts\python.exe -m pip install -e ".[dev]"      # once: installs pytest, pytest-asyncio, etc.
 venv\Scripts\python.exe -m pytest tests -o "addopts=" -p no:cacheprovider -q
 #   -o "addopts="  disables the coverage flags baked into pyproject (faster).
-#   Current green baseline: 654 passed / 0 failed / 0 errors / 3 xfailed.
+#   Current green baseline: 635 passed / 0 failed / 0 errors / 3 xfailed.
+#   Frontend baseline: 129 passed / 3 skipped (12 files).
 
 # Frontend:
 npm --prefix frontend run test     # vitest
@@ -51,27 +52,32 @@ unit test is not proof the screen renders — launch it.
   `workbench/` (git-ignored). Do NOT create new root files or unauthorized docs/scripts.
 - **Multiplatform.** Code must work on Windows AND Linux (path separators, etc.).
 - **Commits:** `type(015): subject` (feat/fix/refactor/test/docs). End the message with a trailer:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. Atomic commits; green tests at each step.
+  `Co-Authored-By: Claude <noreply@anthropic.com>` (or the current model name). Atomic commits; green tests at each step.
 
 ## 4. Architecture map (where things live)
 
 **Backend `src/mindflow/`** (layered; lower layers must not import higher ones):
 - `api/server.py` — FastAPI app + routers. `api/routes/*` — HTTP endpoints only (no business logic).
-- `engine/` — `orchestrator.py` (the real execution path), `executor.py` (`GraphExecutor` = topo sort),
-  `validator.py`. **`engine/` MUST NOT import from `mindflow.api`** (dependency inversion — providers
+- `engine/` — `orchestrator.py` (the real execution path), `executor.py` (`GraphExecutor` = a PURE
+  topology utility: topological_sort + cycle detection, nothing else), `validator.py`. **`engine/` MUST NOT import from `mindflow.api`** (dependency inversion — providers
   are injected).
 - `plugins/` — `registry.py` (ComfyUI-style node-type loader: `INPUT_TYPES/RETURN_TYPES/FUNCTION/
   CATEGORY`, `NODE_CLASS_MAPPINGS`, `PLUGIN_MANIFEST`), loads `plugins/core` + `plugins/community`.
 - `providers/` — LLM providers (`openai`, `anthropic`, `ollama`, `gemini`, `openai_chatgpt`).
-- `services/` — currently a 14-file grab-bag (mcp, oauth, storage, graph, chatgpt_client, …) → being
-  tidied into sub-packages.
+- `services/` — organized into sub-packages: `mcp/` (server, client_manager, tool_use_service),
+  `auth/` (oauth, token/secret storage, provider_registry), `storage/` (canvas, versions),
+  `graph/` (graph_service, migration, debate_engine), `llm_web/` (chatgpt_client, conversation_import).
 - `models/` — pydantic models (node, graph, group, provider, …).
 
 **Frontend `frontend/src/`** (React 19 + ReactFlow 11 + Zustand 5 + Tailwind 3 + Vite 7):
-- `App.tsx` renders only `components/Canvas.tsx` (a god-component holding all interaction).
-- `components/` — ~40 flat files (the mess). `features/canvas/` — a half-built feature structure that
-  coexists with it. Target: migrate to **feature-based**, keep `components/ui/` as the design system.
+- `App.tsx` renders only `features/canvas/components/Canvas.tsx` (still a large orchestrator —
+  internal decomposition is deferred, see ROADMAP).
+- **Feature-based layout**: components live under `features/{canvas,nodes,providers,mcp,plugins,
+  debate,settings,logging,import}/components/`. `components/` keeps only the shared `ui/` design
+  system (Button, Card, Dialog, Input), `icons/`, and `ErrorBoundary`.
 - `stores/` — Zustand stores. `types/`, `services/api.ts`.
+- NOTE: `npm run build` type-checks ONLY `src/` (tsconfig.app.json include) — a green build does
+  NOT cover `frontend/tests/`; always run `npm --prefix frontend run test` too.
 - **Design tokens** live in `src/index.css` (`:root` = light, `.dark` = dark). Components must use
   `var(--node-bg / --node-text / --node-border / --primary-color / …)`, NEVER hardcoded hex.
 
@@ -87,18 +93,20 @@ unit test is not proof the screen renders — launch it.
 
 ## 6. Key gotchas (discovered — don't relearn the hard way)
 
-- **Theme:** default is `dark` (`types/canvas.ts`); both themes work; theme is **not persisted**
-  (resets on reload). Toggle is in Settings (Sun/Moon).
-- **Node colors:** `components/Node.tsx` now reads CSS tokens — keep it that way (it used to hardcode
+- **Theme:** first-run default follows the OS (`getSystemDefaultTheme()` in `types/canvas.ts`);
+  the user's choice IS persisted (zustand persist, localStorage key `mindflow-ui-preferences`,
+  preferences slice only — rehydration is shape-guarded against corrupt values). Toggle in Settings.
+- **Node colors:** `features/nodes/components/Node.tsx` reads CSS tokens — keep it that way (it used to hardcode
   `#1E1E2E` and broke light mode).
-- **Engine cache:** `GraphExecutor`'s dirty/clean cache is currently **dead code** (the executor is
-  recreated per request, so nothing persists; `ExecuteRequest.force_rerun` is unused). Decide kill vs
-  wire before relying on it.
+- **Engine cache (RESOLVED — killed):** the never-wired dirty/clean cache was removed;
+  `GraphExecutor` is a pure topology utility and `force_rerun`/`mark-dirty` no longer exist.
+  Real incremental recompute is a future vision feature (see ROADMAP), to be designed deliberately.
 - **Gemini SDK** is **`google-genai`** (`from google import genai`, per-instance `genai.Client`), NOT
   the legacy `google-generativeai`. `pyproject` pins `google-genai>=1.0.0`.
 - **Node validation is intentionally loose** (Feature 014): `NodeType = str` (dynamic plugin types),
   `content` min_length = 0 (empty plugin nodes). Do NOT "restore" strict validation.
-- **Two registries, different things:** `services/provider_registry` (LLM providers) vs
+- **Two registries, different things:** `services/auth/provider_registry` (LLM providers) vs
   `plugins/registry` (node types). Don't conflate.
-- **Provider endpoints:** the backend `OpenAIProvider` accepts a custom `base_url` (= `endpoint_url`),
-  but the UI only exposes that field for the `local` (Ollama) type today.
+- **Provider endpoints:** `OpenAIProvider` accepts a custom `base_url` (= `endpoint_url`); the UI
+  exposes it for `local` (Ollama) AND as an optional "Custom base URL (advanced)" field on OpenAI
+  providers (for OpenAI-compatible proxies).

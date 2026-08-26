@@ -17,22 +17,24 @@
 ---
 
 ## 🛠️ Backend — finish the foundation cleanup
-- [ ] **Phase 1b — single execution engine.** Decide the dirty/clean cache: **kill** the dead code, or **wire** it for real incremental recompute (re-run a branch without recomputing unchanged ancestors). *Decision pending.* — ◐
-- [ ] **Tidy `services/`** (14 mixed services → sub-packages: `mcp/`, `auth/`, `storage/`, `llm_web/`, `graph/`). — ◐
-- [ ] **Dedup `mcp_server.py`** (root vs `services/mcp_server.py`). — ⚡
-- [ ] `@app.on_event("startup")` → FastAPI **`lifespan`** + a single **composition root** for singletons. — ⚡
-- [ ] **Consolidate the 3 test trees** (`tests/unit`, `tests/integration`, `tests/backend`) + duplicate migration tests. — ◐
-- [ ] `install.bat` should install `.[dev]` (tests can't run after a fresh install today). — ⚡
-- [ ] Replace deprecated `FieldValidationInfo` import (`models/provider.py`). — ⚡
-- [ ] **Guardrail:** layering lint forbidding `engine → api`; architecture docs. — ⚡
+- [x] **Phase 1b — single execution engine.** Decided: **killed** the dead dirty/clean cache; `GraphExecutor` is a pure topology utility. Real incremental recompute moved to Vision below. — ◐
+- [x] **Tidy `services/`** — reorganized into `mcp/`, `auth/`, `storage/`, `graph/`, `llm_web/` sub-packages. — ◐
+- [x] **Dedup `mcp_server.py`** — root `mindflow/mcp_server.py` is the documented CLI entry point; the implementation lives in `services/mcp/server.py`. — ⚡
+- [x] `@app.on_event("startup")` → FastAPI **`lifespan`** + a single composition root. — ⚡
+- [x] **Consolidate the 3 test trees** → `tests/{unit,integration,contract}`; `tests/backend/` removed. — ◐
+- [x] `install.bat`/`install.sh` install `.[dev]`. — ⚡
+- [x] Replace deprecated `FieldValidationInfo` import (`models/provider.py`). — ⚡
+- [x] **Guardrail:** AST layering test forbidding `engine → api` (`tests/unit/test_engine_layering.py`). — ⚡
+- [ ] **Decide `services/mcp/tool_use_service.py`** — dead code since the legacy `llm_operations` route was removed; either wire MCP tool-use into graph execution (fits the MCP vision) or delete it. — ⚡
 
 ## 🎨 UI — the active track (dark / ComfyUI finish)
-- [ ] **Node refinement** — typography, spacing, header treatment, hover states. — ⚡
+- [x] **Node refinement** — tokenized shadows/radius, typography hierarchy, hover/selected states. — ⚡
 - [ ] **Thread mode** — the simple "ChatGPT-like" stacked view; one graph, two views (Thread ⟷ Canvas). The core of the *simple + powerful* vision. — ⛰
-- [ ] **Frontend modularization** — flat `components/` (~40 files) → feature-based; decompose `Canvas.tsx` (god-component); fix ReactFlow `nodeTypes` memoization warning. — ◐
-- [ ] **Branding** — integrate `logo.png` / `Logo2.png`, a real top bar. — ⚡
-- [ ] **Theme** — persistence (localStorage) + configurable default / follow system (`prefers-color-scheme`). — ⚡
-- [ ] **Custom `endpoint_url` for OpenAI providers** — unlocks pointing at an OpenAI-compatible proxy from the UI (backend already supports `base_url`; only `local`/Ollama exposes the field today). *Decision pending.* — ⚡
+- [x] **Frontend modularization (folder migration)** — components live under `features/*/components/`. — ◐
+- [ ] **Decompose `Canvas.tsx` internals** (still ~1400 lines; design-sensitive, do deliberately). ReactFlow warning #002 persists in dev StrictMode only (memoization is in place; harmless). — ◐
+- [x] **Branding** — favicon + MindFlow top bar; assets in `frontend/public/` (`logo-full.png` is shipped but not yet referenced — use or drop it). — ⚡
+- [x] **Theme** — persisted (localStorage) + first-run follows the OS. NOTE: this supersedes the earlier hard-`dark` default — flip `defaultPreferences.theme` back if dark-always is preferred. — ⚡
+- [x] **Custom `endpoint_url` for OpenAI providers** — 'Custom base URL (advanced)' field in the provider UI (OpenAI-compatible proxies). — ⚡
 
 ## 🚀 Vision — beyond cleanup (larger)
 - [ ] **MCP in/out** — finish bidirectional MCP: consume MCP servers **and** expose graphs/groups **as** callable MCP tools. — ⛰
@@ -45,9 +47,11 @@
 
 ---
 
-## ⏳ Open decisions (waiting on the user)
-1. **OpenAI custom endpoint field** — add it now (enables proxies) or note for later?
-2. **Engine dirty/clean cache** — kill the dead cache, or wire real incremental recompute?
+## ⏳ Open decisions
+*(Both earlier decisions are resolved: the OpenAI endpoint field shipped, and the dead engine
+cache was killed — incremental recompute is now a Vision item.)*
+1. **Theme default** — first-run currently follows the OS; flip to always-dark if preferred (1 line).
+2. **`tool_use_service.py`** — wire into the MCP vision or delete (see Backend list).
 
 ## Suggested next order
-Node refinement (⚡, visible) → scope **Thread mode** together (the core) → close out the backend tidy. Reorder freely.
+Scope **Thread mode** together (the core of the vision) → MCP in/out → debate node / web providers.

@@ -1,7 +1,7 @@
 """Tests: graph execution engine — topological sort and cycle detection.
 
 (Node execution + parent-failure propagation are tested via the Orchestrator
-in tests/backend/unit/test_orchestrator.py — GraphExecutor is now a pure
+in tests/unit/test_orchestrator.py — GraphExecutor is now a pure
 topology utility.)
 """
 

@@ -440,3 +440,74 @@ class TestTemplateVariableSubstitution:
         assert results[n2]["status"] == "completed"
         # The prompt should have been substituted: "Explain quantum computing simply"
         assert "Answer to: Explain quantum computing simply" in results[n2]["outputs"]["response"]
+
+
+class CountingTextInput(FakeTextInput):
+    """Text input that counts executions (class-level, reset per test)."""
+
+    calls = 0
+
+    def execute(self, text: str = "", **kwargs) -> tuple:
+        type(self).calls += 1
+        return (text,)
+
+
+class FakeConcat:
+    """Two-input merge node — the multi-parent (diamond) case."""
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("text",)
+    FUNCTION = "execute"
+    CATEGORY = "text"
+    STREAMING = False
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"text_a": ("STRING", {}), "text_b": ("STRING", {})}}
+
+    def execute(self, text_a: str = "", text_b: str = "", **kwargs) -> tuple:
+        return (f"{text_a}|{text_b}",)
+
+
+class TestOrchestratorDiamond:
+    """Diamond DAG: A → B, A → C, then B+C merge into D.
+
+    Guards the two core multi-parent invariants at the execution level
+    (previously covered by the deleted GraphExecutor.execute tests):
+    the shared ancestor runs exactly once, and BOTH branches' outputs
+    reach the merge node through its named input ports.
+    """
+
+    @pytest.mark.asyncio
+    async def test_shared_ancestor_runs_once_and_both_branches_merge(self):
+        CountingTextInput.calls = 0
+        a, b, c, d = uuid4(), uuid4(), uuid4(), uuid4()
+        graph = _make_graph({
+            a: {"content": "root", "class_type": "counting_input",
+                "children": [b, c]},
+            b: {"class_type": "text_input", "parents": [a], "children": [d],
+                "connections": {"text": {"source_node_id": str(a),
+                                         "output_name": "text"}}},
+            c: {"class_type": "text_input", "parents": [a], "children": [d],
+                "connections": {"text": {"source_node_id": str(a),
+                                         "output_name": "text"}}},
+            d: {"class_type": "concat", "parents": [b, c],
+                "connections": {
+                    "text_a": {"source_node_id": str(b), "output_name": "text"},
+                    "text_b": {"source_node_id": str(c), "output_name": "text"},
+                }},
+        })
+        registry = _make_registry({
+            "counting_input": CountingTextInput,
+            "text_input": FakeTextInput,
+            "concat": FakeConcat,
+        })
+
+        orchestrator = Orchestrator(graph=graph, registry=registry)
+        results = await orchestrator.execute(target=d)
+
+        # The shared ancestor executed exactly once despite two paths to D.
+        assert CountingTextInput.calls == 1
+        # Every node completed, and both branch values reached the merge node.
+        assert all(r["status"] == "completed" for r in results.values())
+        assert results[d]["outputs"]["text"] == "root|root"

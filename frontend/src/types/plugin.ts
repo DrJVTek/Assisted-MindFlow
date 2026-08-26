@@ -48,8 +48,9 @@ export interface TypeDefinition {
 
 /** Category info for grouping node types */
 export interface CategoryInfo {
-  id: string;
+  name: string;
   display_name: string;
+  icon?: string;
 }
 
 /** Full response from GET /api/node-types */

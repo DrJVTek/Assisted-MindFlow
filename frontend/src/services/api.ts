@@ -102,14 +102,6 @@ apiClient.interceptors.response.use(
  */
 export const api = {
   /**
-   * Health check
-   */
-  health: async (): Promise<{ status: string }> => {
-    const response = await apiClient.get('/health');
-    return response.data;
-  },
-
-  /**
    * Get complete graph data
    */
   getGraph: async (graphId: string): Promise<Graph> => {

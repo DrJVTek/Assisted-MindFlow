@@ -176,10 +176,14 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         set({ isExecuting: false });
         break;
 
-      case 'execution_error':
-        logEvent('exec', 'error', 'Execution failed', data.error as string);
-        set({ isExecuting: false, error: data.error as string });
+      case 'execution_error': {
+        // The terminal execution_error event only carries {status}; per-node
+        // node_error events hold the real messages.
+        const message = (data.error as string | undefined) ?? 'One or more nodes failed';
+        logEvent('exec', 'error', 'Execution failed', message);
+        set({ isExecuting: false, error: message });
         break;
+      }
     }
   },
 
@@ -200,17 +204,29 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
         });
         if (!res.ok) throw new Error(`Execution failed: ${res.statusText}`);
         const data = await res.json();
-        // Simulate events so the reducer logic stays centralised in applyEvent
+        // Simulate events so the reducer logic stays centralised in applyEvent.
+        // (The non-stream response carries no execution_order field.)
         store.applyEvent('execution_start', {
           execution_id: data.execution_id,
-          execution_order: data.execution_order,
         });
         for (const [id, r] of Object.entries(data.results || {})) {
           const result = r as NodeResult;
-          store.applyEvent('node_complete', {
-            node_id: id,
-            outputs: result.outputs || {},
-          });
+          if (result.status === 'failed') {
+            store.applyEvent('node_error', {
+              node_id: id,
+              error: result.error ?? 'Node failed',
+            });
+          } else if (result.status === 'cancelled') {
+            store.applyEvent('node_error', {
+              node_id: id,
+              error: 'Cancelled due to upstream failure',
+            });
+          } else {
+            store.applyEvent('node_complete', {
+              node_id: id,
+              outputs: result.outputs || {},
+            });
+          }
         }
         store.endExecution();
       } catch (err) {

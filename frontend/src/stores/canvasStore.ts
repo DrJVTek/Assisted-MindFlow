@@ -295,4 +295,15 @@ export const useCanvasStore = create<CanvasStore>()(persist((set, get) => ({
   // server/session state and must NOT be rehydrated from localStorage.
   name: 'mindflow-ui-preferences',
   partialize: (state) => ({ preferences: state.preferences }),
+  // Guard rehydration: a tampered/legacy value (e.g. {"preferences": null})
+  // must not crash the app at boot — malformed slices fall back to defaults,
+  // and missing keys are filled from defaults.
+  merge: (persisted, current) => {
+    const p = persisted as { preferences?: unknown } | undefined;
+    const prefs =
+      p && typeof p.preferences === 'object' && p.preferences !== null
+        ? (p.preferences as Partial<UIPreferences>)
+        : {};
+    return { ...current, preferences: { ...current.preferences, ...prefs } };
+  },
 }));

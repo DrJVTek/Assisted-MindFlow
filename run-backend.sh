@@ -13,7 +13,7 @@ echo ""
 if [ ! -f "venv/bin/activate" ]; then
     echo "ERROR: Virtual environment not found!"
     echo "Please run: python -m venv venv"
-    echo "Then run: venv/bin/pip install -e ."
+    echo "Then run: venv/bin/pip install -e \".[dev]\""
     exit 1
 fi
 

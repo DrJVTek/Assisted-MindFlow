@@ -90,14 +90,25 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   validateProvider: async (id: string) => {
-    const result = await api.validateProvider(id);
-    set(state => ({
-      providers: state.providers.map(p =>
-        p.id === id
-          ? { ...p, status: result.status, available_models: result.available_models }
-          : p
-      ),
-    }));
+    try {
+      const result = await api.validateProvider(id);
+      set(state => ({
+        providers: state.providers.map(p =>
+          p.id === id
+            ? { ...p, status: result.status as ProviderConfig['status'], available_models: result.available_models }
+            : p
+        ),
+      }));
+    } catch (err) {
+      // Mark provider as error locally so the UI shows the red icon
+      // instead of silently doing nothing.
+      set(state => ({
+        providers: state.providers.map(p =>
+          p.id === id ? { ...p, status: 'error' as ProviderConfig['status'] } : p
+        ),
+      }));
+      throw err;
+    }
   },
 
   getProviderModels: async (id: string) => {

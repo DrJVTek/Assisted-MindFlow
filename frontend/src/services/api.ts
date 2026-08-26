@@ -4,6 +4,7 @@
  */
 
 import axios, { type AxiosInstance, type AxiosError } from 'axios';
+import { logEvent } from '../stores/logStore';
 import type { Graph, NodeVersion } from '../types/graph';
 import type { CanvasViewport } from '../types/canvas';
 import type {
@@ -41,23 +42,56 @@ const apiClient: AxiosInstance = axios.create({
 });
 
 /**
- * Response interceptor for error handling
+ * Response interceptor for error handling.
+ *
+ * FastAPI returns errors as `{detail: "..."}` in the response body.
+ * Earlier code only looked at `data.message`, which silently dropped
+ * every backend error message and produced generic "Request failed
+ * with status code XXX" errors. This interceptor extracts the real
+ * message so UI components can show actionable details.
  */
 apiClient.interceptors.response.use(
   response => response,
   (error: AxiosError) => {
-    // Log errors for debugging
     console.error('API Error:', {
       message: error.message,
       status: error.response?.status,
       data: error.response?.data,
     });
 
-    // Transform error for consistent handling
-    const errorMessage =
-      (error.response?.data as { message?: string })?.message ||
-      error.message ||
-      'An unknown error occurred';
+    const data = error.response?.data as
+      | { detail?: string | Array<{ msg?: string; loc?: string[] }>; message?: string }
+      | undefined;
+
+    let errorMessage: string = error.message || 'An unknown error occurred';
+
+    if (data) {
+      if (typeof data.detail === 'string') {
+        // Standard FastAPI HTTPException(detail=...) format
+        errorMessage = data.detail;
+      } else if (Array.isArray(data.detail)) {
+        // Pydantic validation error format: [{loc, msg, type}, ...]
+        errorMessage = data.detail
+          .map((d) => {
+            const loc = d.loc ? d.loc.join('.') : '';
+            return loc ? `${loc}: ${d.msg}` : d.msg || '';
+          })
+          .filter(Boolean)
+          .join('; ') || errorMessage;
+      } else if (typeof data.message === 'string') {
+        errorMessage = data.message;
+      }
+    }
+
+    // Mirror every HTTP error into the bottom log panel so the user
+    // sees them without opening devtools. Covers ALL endpoints through
+    // this single boundary point — we don't have to decorate every
+    // callsite individually.
+    const method = (error.config?.method || 'HTTP').toUpperCase();
+    const url = error.config?.url || '?';
+    const status = error.response?.status;
+    const label = status ? `${status} ${method} ${url}` : `${method} ${url}`;
+    logEvent('http', 'error', label, errorMessage);
 
     return Promise.reject(new Error(errorMessage));
   }
@@ -67,14 +101,6 @@ apiClient.interceptors.response.use(
  * API methods
  */
 export const api = {
-  /**
-   * Health check
-   */
-  health: async (): Promise<{ status: string }> => {
-    const response = await apiClient.get('/health');
-    return response.data;
-  },
-
   /**
    * Get complete graph data
    */
@@ -153,9 +179,9 @@ export const api = {
       position?: { x: number; y: number };
       child_ids?: string[];
       llm_response?: string | null;
-      llm_operation_id?: string | null;
+      inputs?: Record<string, unknown>;
       font_size?: number;
-      // Feature 009: Inline LLM fields
+      // Inline LLM fields
       llm_status?: string;
       llm_error?: string | null;
       prompt_height?: number;
@@ -213,31 +239,6 @@ export const api = {
    */
   deleteNode: async (graphId: string, nodeId: string): Promise<void> => {
     await apiClient.delete(`/graphs/${graphId}/nodes/${nodeId}`);
-  },
-
-  /**
-   * Regenerate cascade from a modified node
-   */
-  regenerateCascade: async (
-    graphId: string,
-    modifiedNodeId: string,
-    options?: {
-      llmProvider?: string;
-      llmModel?: string;
-    }
-  ): Promise<{
-    success: boolean;
-    affected_nodes: string[];
-    regenerated_count: number;
-    errors: Array<{ node_id: string; error: string }>;
-    message: string;
-  }> => {
-    const response = await apiClient.post(`/graphs/${graphId}/regenerate-cascade`, {
-      modified_node_id: modifiedNodeId,
-      llm_provider: options?.llmProvider || 'mock',
-      llm_model: options?.llmModel || 'mock-model',
-    });
-    return response.data;
   },
 
   // ============================================================================

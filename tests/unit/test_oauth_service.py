@@ -11,16 +11,32 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 from mindflow.models.oauth_session import OAuthSession
-from mindflow.services.oauth_service import (
-    AUTH_ENDPOINT,
-    CLIENT_ID,
+from mindflow.models.provider import ProviderType
+from mindflow.services.auth.oauth_service import (
+    OAUTH_CONFIGS,
     OAuthService,
-    build_authorization_url,
     generate_code_challenge,
     generate_code_verifier,
     generate_state,
+    get_oauth_config,
 )
-from mindflow.services.token_storage import TokenStorage
+from mindflow.services.auth.token_storage import TokenStorage
+
+# OAuth config used across tests (OpenAI/ChatGPT share the same endpoints).
+_OPENAI_CONFIG = OAUTH_CONFIGS[ProviderType.OPENAI]
+AUTH_ENDPOINT = _OPENAI_CONFIG.auth_endpoint
+CLIENT_ID = _OPENAI_CONFIG.client_id
+
+TEST_PROVIDER_ID = "test-provider-id"
+
+
+def _make_service(token_storage: TokenStorage) -> OAuthService:
+    """Build an OAuthService bound to the OpenAI OAuth config."""
+    return OAuthService(
+        provider_id=TEST_PROVIDER_ID,
+        oauth_config=_OPENAI_CONFIG,
+        token_storage=token_storage,
+    )
 
 
 class TestCodeVerifier:
@@ -95,15 +111,43 @@ class TestState:
         assert re.match(r"^[A-Za-z0-9_-]+$", state)
 
 
-class TestAuthorizationURL:
-    """Test OAuth URL construction."""
+class TestOAuthConfig:
+    """Test OAuth provider config registry."""
 
-    def test_url_starts_with_auth_endpoint(self):
-        url = build_authorization_url("challenge", "state123", "http://localhost:1455/auth/callback")
+    def test_openai_config_present(self):
+        config = get_oauth_config(ProviderType.OPENAI)
+        assert config is not None
+        assert config.auth_endpoint == AUTH_ENDPOINT
+        assert config.client_id == CLIENT_ID
+
+    def test_chatgpt_web_config_present(self):
+        config = get_oauth_config(ProviderType.CHATGPT_WEB)
+        assert config is not None
+        assert config.auth_endpoint.startswith("https://")
+        assert config.client_id
+
+    def test_unsupported_provider_returns_none(self):
+        assert get_oauth_config(ProviderType.LOCAL) is None
+
+
+class TestAuthorizationURL:
+    """Test OAuth URL construction via OAuthService._build_authorization_url."""
+
+    @pytest.fixture
+    def service(self, tmp_path: Path) -> OAuthService:
+        storage = TokenStorage(oauth_dir=tmp_path, salt_path=tmp_path / ".salt")
+        return _make_service(storage)
+
+    def test_url_starts_with_auth_endpoint(self, service: OAuthService):
+        url = service._build_authorization_url(
+            "challenge", "state123", "http://localhost:1455/auth/callback"
+        )
         assert url.startswith(AUTH_ENDPOINT)
 
-    def test_contains_required_params(self):
-        url = build_authorization_url("test_challenge", "test_state", "http://localhost:8080/auth/callback")
+    def test_contains_required_params(self, service: OAuthService):
+        url = service._build_authorization_url(
+            "test_challenge", "test_state", "http://localhost:8080/auth/callback"
+        )
         parsed = urlparse(url)
         params = parse_qs(parsed.query)
 
@@ -114,8 +158,10 @@ class TestAuthorizationURL:
         assert params["state"] == ["test_state"]
         assert params["redirect_uri"] == ["http://localhost:8080/auth/callback"]
 
-    def test_includes_openid_scope(self):
-        url = build_authorization_url("c", "s", "http://localhost:1234/auth/callback")
+    def test_includes_openid_scope(self, service: OAuthService):
+        url = service._build_authorization_url(
+            "c", "s", "http://localhost:1234/auth/callback"
+        )
         parsed = urlparse(url)
         params = parse_qs(parsed.query)
         assert "openid" in params["scope"][0]
@@ -126,23 +172,21 @@ class TestTokenRefresh:
 
     @pytest.fixture
     def storage_with_session(self, tmp_path: Path) -> tuple[TokenStorage, OAuthSession]:
-        storage = TokenStorage(
-            session_path=tmp_path / "session.enc",
-            salt_path=tmp_path / ".salt",
-        )
+        storage = TokenStorage(oauth_dir=tmp_path, salt_path=tmp_path / ".salt")
         session = OAuthSession(
+            provider_id=TEST_PROVIDER_ID,
             access_token="old_token",
             refresh_token="valid_refresh",
             expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
             subscription_tier="plus",
             user_email="test@example.com",
         )
-        storage.save_session(session)
+        storage.save_session(session, TEST_PROVIDER_ID)
         return storage, session
 
     async def test_refresh_when_token_near_expiry(self, storage_with_session):
         storage, session = storage_with_session
-        service = OAuthService(token_storage=storage)
+        service = _make_service(storage)
 
         token_data = {
             "access_token": "new_token_refreshed",
@@ -156,7 +200,7 @@ class TestTokenRefresh:
         mock_response.raise_for_status = lambda: None
         mock_response.json = lambda: token_data
 
-        with patch("mindflow.services.oauth_service.httpx.AsyncClient") as MockClient:
+        with patch("mindflow.services.auth.oauth_service.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -170,19 +214,17 @@ class TestTokenRefresh:
             assert refreshed.last_refreshed_at is not None
 
     async def test_refresh_with_invalid_refresh_token(self, tmp_path: Path):
-        storage = TokenStorage(
-            session_path=tmp_path / "session.enc",
-            salt_path=tmp_path / ".salt",
-        )
+        storage = TokenStorage(oauth_dir=tmp_path, salt_path=tmp_path / ".salt")
         session = OAuthSession(
+            provider_id=TEST_PROVIDER_ID,
             access_token="old_token",
             refresh_token="invalid_refresh",
             expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
         )
-        storage.save_session(session)
-        service = OAuthService(token_storage=storage)
+        storage.save_session(session, TEST_PROVIDER_ID)
+        service = _make_service(storage)
 
-        with patch("mindflow.services.oauth_service.httpx.AsyncClient") as MockClient:
+        with patch("mindflow.services.auth.oauth_service.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post.side_effect = Exception("invalid_grant")
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -193,11 +235,8 @@ class TestTokenRefresh:
             assert result is None
 
     async def test_refresh_returns_none_when_no_session(self, tmp_path: Path):
-        storage = TokenStorage(
-            session_path=tmp_path / "empty.enc",
-            salt_path=tmp_path / ".salt",
-        )
-        service = OAuthService(token_storage=storage)
+        storage = TokenStorage(oauth_dir=tmp_path, salt_path=tmp_path / ".salt")
+        service = _make_service(storage)
         result = await service.refresh_token()
         assert result is None
 
@@ -206,11 +245,8 @@ class TestDeviceCodeFlow:
     """Test device code flow logic."""
 
     async def test_device_code_request(self, tmp_path: Path):
-        storage = TokenStorage(
-            session_path=tmp_path / "session.enc",
-            salt_path=tmp_path / ".salt",
-        )
-        service = OAuthService(token_storage=storage)
+        storage = TokenStorage(oauth_dir=tmp_path, salt_path=tmp_path / ".salt")
+        service = _make_service(storage)
 
         device_data = {
             "device_code": "test_device_code",
@@ -225,7 +261,7 @@ class TestDeviceCodeFlow:
         mock_response.raise_for_status = lambda: None
         mock_response.json = lambda: device_data
 
-        with patch("mindflow.services.oauth_service.httpx.AsyncClient") as MockClient:
+        with patch("mindflow.services.auth.oauth_service.httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post.return_value = mock_response
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -233,7 +269,7 @@ class TestDeviceCodeFlow:
             MockClient.return_value = mock_client
 
             # Patch asyncio.create_task to avoid background polling
-            with patch("mindflow.services.oauth_service.asyncio.create_task"):
+            with patch("mindflow.services.auth.oauth_service.asyncio.create_task"):
                 result = await service.start_device_code_flow()
 
         assert result["user_code"] == "ABCD-1234"
@@ -241,11 +277,8 @@ class TestDeviceCodeFlow:
         assert result["expires_in"] == 900
 
     async def test_device_code_raises_when_flow_in_progress(self, tmp_path: Path):
-        storage = TokenStorage(
-            session_path=tmp_path / "session.enc",
-            salt_path=tmp_path / ".salt",
-        )
-        service = OAuthService(token_storage=storage)
+        storage = TokenStorage(oauth_dir=tmp_path, salt_path=tmp_path / ".salt")
+        service = _make_service(storage)
         service._flow_in_progress = True
 
         with pytest.raises(RuntimeError, match="already in progress"):
@@ -256,45 +289,38 @@ class TestSessionStatus:
     """Test session status reporting."""
 
     def test_not_connected_when_no_session(self, tmp_path: Path):
-        storage = TokenStorage(
-            session_path=tmp_path / "empty.enc",
-            salt_path=tmp_path / ".salt",
-        )
-        service = OAuthService(token_storage=storage)
+        storage = TokenStorage(oauth_dir=tmp_path, salt_path=tmp_path / ".salt")
+        service = _make_service(storage)
         status = service.get_session_status()
         assert status["status"] == "not_connected"
 
     def test_connected_when_valid_session(self, tmp_path: Path):
-        storage = TokenStorage(
-            session_path=tmp_path / "session.enc",
-            salt_path=tmp_path / ".salt",
-        )
+        storage = TokenStorage(oauth_dir=tmp_path, salt_path=tmp_path / ".salt")
         session = OAuthSession(
+            provider_id=TEST_PROVIDER_ID,
             access_token="valid_token",
             refresh_token="valid_refresh",
             expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
             subscription_tier="plus",
             user_email="test@example.com",
         )
-        storage.save_session(session)
-        service = OAuthService(token_storage=storage)
+        storage.save_session(session, TEST_PROVIDER_ID)
+        service = _make_service(storage)
 
         status = service.get_session_status()
         assert status["status"] == "connected"
         assert status["subscription_tier"] == "plus"
 
     def test_expired_when_token_expired(self, tmp_path: Path):
-        storage = TokenStorage(
-            session_path=tmp_path / "session.enc",
-            salt_path=tmp_path / ".salt",
-        )
+        storage = TokenStorage(oauth_dir=tmp_path, salt_path=tmp_path / ".salt")
         session = OAuthSession(
+            provider_id=TEST_PROVIDER_ID,
             access_token="old_token",
             refresh_token="valid_refresh",
             expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
         )
-        storage.save_session(session)
-        service = OAuthService(token_storage=storage)
+        storage.save_session(session, TEST_PROVIDER_ID)
+        service = _make_service(storage)
 
         status = service.get_session_status()
         assert status["status"] == "session_expired"

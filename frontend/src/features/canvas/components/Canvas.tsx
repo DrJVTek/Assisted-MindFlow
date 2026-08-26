@@ -1,0 +1,1437 @@
+/**
+ * Canvas Component - Main interactive node canvas using React Flow
+ *
+ * Features:
+ * - Infinite canvas with zoom (25%-400%) and pan
+ * - Grid background
+ * - Minimap for navigation
+ * - Controls for zoom/fit-to-view
+ * - Keyboard shortcuts
+ * - Viewport persistence
+ * - Touch gestures: pinch-to-zoom, two-finger pan, tap to select
+ * - Mouse: drag to pan, scroll to zoom, click to select
+ */
+
+import React, { useCallback, useMemo, useEffect, useState, lazy, Suspense } from 'react';
+import ReactFlow, {
+  Background,
+  Controls,
+  MiniMap,
+  BackgroundVariant,
+  ReactFlowProvider,
+  Panel,
+  useReactFlow,
+  applyNodeChanges,
+  addEdge,
+  type Connection,
+} from 'reactflow';
+import { Settings, RefreshCw, Undo, Redo } from 'lucide-react';
+import 'reactflow/dist/style.css';
+
+import { useCanvasStore } from '../../../stores/canvasStore';
+import { useNodeTypesStore } from '../../../stores/nodeTypesStore';
+import { useProviderStore } from '../../../stores/providerStore';
+import { useExecutionStore } from '../../../stores/executionStore';
+import { logEvent } from '../../../stores/logStore';
+import { useGraphData } from '../hooks/useGraphData';
+import { useViewport } from '../hooks/useViewport';
+import { useLayout } from '../hooks/useLayout';
+import { transformGraphToReactFlow, transformNode, visualNodeToReactFlowNode } from '../utils/transform';
+import { useConnectionValidator } from './ConnectionValidator';
+import { MIN_ZOOM, MAX_ZOOM, formatZoomPercentage } from '../utils/viewport';
+import { CustomNode } from '../../nodes/components/Node';
+import { GroupNode } from '../../nodes/components/GroupNode';
+import { CommentNode } from '../../nodes/components/CommentNode';
+import { SettingsPanel } from '../../settings/components/SettingsPanel';
+import { ContextMenu } from './ContextMenu';
+import { NodeCreator } from '../../nodes/components/NodeCreator';
+import { NodeEditor } from '../../nodes/components/NodeEditor';
+import { VersionHistory } from '../../nodes/components/VersionHistory';
+import { DebateControls } from '../../debate/components/DebateControls';
+import { ImportConversationDialog } from '../../import/components/ImportConversationDialog';
+import { LogPanel } from '../../logging/components/LogPanel';
+import { CanvasNavigator } from './CanvasNavigator';
+import { api } from '../../../services/api';
+
+// Type for context menu (defined here to avoid import issues)
+type ContextMenuType = 'canvas' | 'node' | 'group';
+
+// Lazy load DetailPanel for better performance
+const DetailPanel = lazy(() => import('../../nodes/components/DetailPanel').then(module => ({ default: module.DetailPanel })));
+
+// Register custom node types — module-level for stable reference.
+// Also memoized inside CanvasInner as a safety net against HMR re-execution.
+const NODE_TYPES = {
+  custom: CustomNode,
+  group: GroupNode,
+  comment: CommentNode,
+} as const;
+
+// Node type (React Flow's internal type - not exported)
+type Node = {
+  id: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any;
+};
+
+/**
+ * Canvas component wrapped with ReactFlowProvider
+ */
+export function Canvas() {
+  return (
+    <ReactFlowProvider>
+      <CanvasInner />
+    </ReactFlowProvider>
+  );
+}
+
+/**
+ * Inner Canvas component with React Flow
+ */
+function CanvasInner() {
+  const { selectNode, preferences, selectedNodeId, createCanvas, canvases, activeCanvasId, fetchCanvases } = useCanvasStore();
+  const fetchNodeTypes = useNodeTypesStore(s => s.fetchNodeTypes);
+  const nodeTypesLoaded = useNodeTypesStore(s => s.isLoaded);
+  const fetchProviders = useProviderStore(s => s.fetchProviders);
+  const [currentZoom, setCurrentZoom] = useState(1.0);
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
+  const reactFlowInstance = useReactFlow();
+
+  // Stable nodeTypes reference — prevents React Flow warning #002 even during HMR
+  const nodeTypes = useMemo(() => NODE_TYPES, []);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    type: ContextMenuType;
+    nodeId?: string;
+  } | null>(null);
+
+  // Node creator state
+  const [nodeCreatorOpen, setNodeCreatorOpen] = useState(false);
+  const [nodeCreatorParentId, setNodeCreatorParentId] = useState<string | undefined>(undefined);
+  const [nodeCreatorPosition, setNodeCreatorPosition] = useState<{ x: number; y: number } | undefined>(undefined);
+
+  // Node editor state
+  const [nodeEditorOpen, setNodeEditorOpen] = useState(false);
+  const [nodeBeingEdited, setNodeBeingEdited] = useState<string | null>(null);
+
+  // Version history state
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
+  const [versionHistoryNodeId, setVersionHistoryNodeId] = useState<string | null>(null);
+
+  // Import conversation dialog state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+  // Local state for nodes and edges (synced with ReactFlow)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [localNodes, setLocalNodes] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [localEdges, setLocalEdges] = useState<any[]>([]);
+
+  // Multi-selection state
+  const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
+
+  // Edge hover tooltip — shows the text value flowing through a connection
+  // by reading nodeResults from the shared executionStore. Populated only
+  // when the user hovers an edge whose source has run at least once.
+  const [edgeTooltip, setEdgeTooltip] = useState<{
+    x: number;
+    y: number;
+    title: string;
+    body: string;
+  } | null>(null);
+  const nodeResultsForHover = useExecutionStore((s) => s.nodeResults);
+
+  // Connection validation — passes the current React Flow node list to the
+  // validator so it can resolve source/target class_types and run the full
+  // type compatibility matrix (STRING→CONTEXT, INT→FLOAT, etc.).
+  const { isValidConnection } = useConnectionValidator(
+    () => reactFlowInstance.getNodes()
+  );
+
+  // Load canvases, node-type metadata, and providers on mount.
+  // - nodeTypesStore: source of truth for port names, colors, display
+  //   names, and credential specs
+  // - providerStore: list of configured LLM providers shown in the
+  //   DetailPanel Provider dropdown (without this, the dropdown is
+  //   empty and the user can't assign a provider to a node).
+  useEffect(() => {
+    fetchCanvases();
+    if (!nodeTypesLoaded) {
+      fetchNodeTypes();
+    }
+    fetchProviders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
+
+  // Get graphId from active canvas
+  const activeCanvas = canvases.find(c => c.id === activeCanvasId);
+  const graphId = activeCanvas?.graph_id;
+
+  // Load graph data from API (only if we have an active canvas)
+  const { graphData, isLoading, error, refreshGraph } = useGraphData(graphId || '');
+
+  // Viewport management with persistence
+  const { saveViewport, zoomIn, zoomOut } = useViewport(graphId);
+
+  // Layout reorganization with undo/redo
+  const {
+    handleReorganize,
+    isLoading: isReorganizing,
+    undo: undoReorganize,
+    redo: redoReorganize,
+    canUndo,
+    canRedo,
+  } = useLayout(localNodes, localEdges, setLocalNodes, graphId);
+
+  // Apply theme to document — both data-theme attribute and .dark class for Tailwind
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', preferences.theme);
+    if (preferences.theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [preferences.theme]);
+
+  // Base transform: depends ONLY on graphData. This is the canonical
+  // node/edge list straight from the backend, used to initialise and
+  // re-sync localNodes when graphData changes (e.g., after a refresh).
+  // Critically: this does NOT depend on selectedNodeId or currentZoom,
+  // so clicking a node or scrolling to zoom does not trigger a reset of
+  // local drag positions.
+  const baseTransform = useMemo(() => {
+    if (!graphData) return { nodes: [], edges: [] };
+    return transformGraphToReactFlow(graphData);
+  }, [graphData]);
+
+  // Sync localNodes/localEdges only when graphData changes.
+  useEffect(() => {
+    setLocalNodes(baseTransform.nodes);
+    setLocalEdges(baseTransform.edges);
+  }, [baseTransform]);
+
+  // Render-time decoration: apply currentZoom into node data and edge
+  // emphasis for the selected node. These are derived from localNodes/
+  // localEdges so drag positions are preserved, and they don't flow back
+  // into state — they're consumed directly by <ReactFlow nodes={...} />.
+  const nodes = useMemo(() => {
+    return localNodes.map(n => ({
+      ...n,
+      data: { ...n.data, currentZoom },
+    }));
+  }, [localNodes, currentZoom]);
+
+  const edges = useMemo(() => {
+    if (!selectedNodeId) return localEdges;
+    return localEdges.map(edge => {
+      const isConnected = edge.source === selectedNodeId || edge.target === selectedNodeId;
+      if (isConnected) {
+        return {
+          ...edge,
+          style: {
+            ...edge.style,
+            strokeWidth: 3,
+            opacity: 1.0,
+            stroke: '#1976D2',
+          },
+          zIndex: 10,
+        };
+      }
+      return edge;
+    });
+  }, [localEdges, selectedNodeId]);
+
+  // Find selected node from graph data
+  const selectedNode = useMemo(() => {
+    if (!selectedNodeId || !graphData) return null;
+    return graphData.nodes[selectedNodeId] || null;
+  }, [selectedNodeId, graphData]);
+
+  // Check if selected node has connected children (for debate controls)
+  const selectedNodeHasChildren = useMemo(() => {
+    if (!selectedNodeId) return false;
+    return localEdges.some(edge => edge.source === selectedNodeId);
+  }, [selectedNodeId, localEdges]);
+
+  // Find node being edited from graph data
+  const nodeToEdit = useMemo(() => {
+    if (!nodeBeingEdited || !graphData) return null;
+    return graphData.nodes[nodeBeingEdited] || null;
+  }, [nodeBeingEdited, graphData]);
+
+  // Handle viewport changes (save to localStorage with debounce)
+  const onMove = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (_event: any, viewport: any) => {
+      saveViewport(viewport);
+      setCurrentZoom(viewport.zoom);
+    },
+    [saveViewport]
+  );
+
+  // Handle node click (only open detail panel for regular nodes)
+  const onNodeClick = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      if (node.type !== 'custom') return;
+      selectNode(node.id);
+    },
+    [selectNode]
+  );
+
+  // Handle node double-click (open editor)
+  const onNodeDoubleClick = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      setNodeBeingEdited(node.id);
+      setNodeEditorOpen(true);
+    },
+    []
+  );
+
+  // Handle node changes (drag, select, etc.) - sync with local state
+  const onNodesChange = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (changes: any[]) => {
+      setLocalNodes((nds) => {
+        const updatedNodes = applyNodeChanges(changes, nds);
+
+        // Track selected nodes for multi-selection
+        const selected = updatedNodes
+          .filter((node) => node.selected)
+          .map((node) => node.id);
+        setSelectedNodes(selected);
+
+        return updatedNodes;
+      });
+    },
+    []
+  );
+
+  // Handle new connection between nodes. Connections must always be made
+  // via named ComfyUI-style ports — a node without plugin metadata has no
+  // visible handles at all, so we should never see a null handle here.
+  const onConnect = useCallback(
+    async (connection: Connection) => {
+      if (!graphId || !connection.source || !connection.target) return;
+
+      const sourceHandle = connection.sourceHandle;
+      const targetHandle = connection.targetHandle;
+
+      if (!sourceHandle || !targetHandle) {
+        const msg = 'Refusing connection with missing handles — node metadata not loaded yet';
+        console.error('[Canvas]', msg);
+        logEvent('edge', 'warn', msg);
+        return;
+      }
+
+      // Add edge to local state
+      setLocalEdges(eds => addEdge(connection, eds));
+
+      // Persist via PUT — the backend syncs parents/children from the named
+      // connection automatically.
+      const shortSrc = (connection.source || '').slice(0, 8);
+      const shortTgt = (connection.target || '').slice(0, 8);
+      try {
+        const response = await fetch(`/api/graphs/${graphId}/nodes/${connection.target}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            connection: {
+              input_name: targetHandle,
+              source_node_id: connection.source,
+              output_name: sourceHandle,
+            },
+          }),
+        });
+        if (!response.ok) {
+          console.error('[Canvas] Failed to save connection:', response.statusText);
+          logEvent('edge', 'error', `Failed to create edge ${shortSrc}.${sourceHandle} → ${shortTgt}.${targetHandle}`, response.statusText);
+        } else {
+          logEvent('edge', 'success', `Connected ${shortSrc}.${sourceHandle} → ${shortTgt}.${targetHandle}`);
+        }
+      } catch (err) {
+        console.error('[Canvas] Error saving connection:', err);
+        logEvent('edge', 'error', `Error creating edge ${shortSrc} → ${shortTgt}`, (err as Error).message);
+      }
+    },
+    [graphId]
+  );
+
+  // Edge hover — read the value flowing through the connection from the
+  // shared executionStore and surface it in a floating tooltip. Useful for
+  // "what does this edge actually carry?" debugging without opening the
+  // DetailPanel. Only shows meaningful data after at least one execution
+  // has populated nodeResults for the source node.
+  const formatEdgeValue = useCallback(
+    (edge: { source: string; sourceHandle?: string | null; targetHandle?: string | null }) => {
+      const handle = edge.sourceHandle || 'text';
+      const result = nodeResultsForHover[edge.source];
+      if (!result) {
+        return {
+          title: `${handle} → ${edge.targetHandle || '?'}`,
+          body: '(no data yet — execute a downstream node to populate)',
+        };
+      }
+      // Prefer the named output, then accumulated streaming tokens, then any other output
+      const outputs = result.outputs as Record<string, unknown> | undefined;
+      let raw: unknown =
+        outputs?.[handle] ??
+        result.tokens ??
+        outputs?.text ??
+        outputs?.response ??
+        outputs?.output;
+      if (raw === undefined || raw === null) {
+        if (result.error) {
+          return {
+            title: `${handle} → ${edge.targetHandle || '?'} (error)`,
+            body: result.error,
+          };
+        }
+        return {
+          title: `${handle} → ${edge.targetHandle || '?'}`,
+          body: '(empty)',
+        };
+      }
+      const asString = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+      const truncated = asString.length > 800 ? asString.slice(0, 800) + '…' : asString;
+      return {
+        title: `${handle} → ${edge.targetHandle || '?'}  (${asString.length} chars)`,
+        body: truncated,
+      };
+    },
+    [nodeResultsForHover]
+  );
+
+  const onEdgeMouseEnter = useCallback(
+    (event: React.MouseEvent, edge: { source: string; sourceHandle?: string | null; targetHandle?: string | null }) => {
+      const { title, body } = formatEdgeValue(edge);
+      setEdgeTooltip({ x: event.clientX + 12, y: event.clientY + 12, title, body });
+    },
+    [formatEdgeValue]
+  );
+
+  const onEdgeMouseMove = useCallback(
+    (event: React.MouseEvent) => {
+      setEdgeTooltip((prev) => (prev ? { ...prev, x: event.clientX + 12, y: event.clientY + 12 } : prev));
+    },
+    []
+  );
+
+  const onEdgeMouseLeave = useCallback(() => setEdgeTooltip(null), []);
+
+  // Handle edge deletion — user pressed Delete/Backspace on a selected edge,
+  // or edges were removed programmatically. Calls the backend DELETE endpoint
+  // which cleans up both `connections` dict and `parents/children` lists.
+  const onEdgesDelete = useCallback(
+    async (deletedEdges: { id: string; source: string; target: string; targetHandle?: string | null }[]) => {
+      if (!graphId) return;
+
+      for (const edge of deletedEdges) {
+        const shortSrc = (edge.source || '').slice(0, 8);
+        const shortTgt = (edge.target || '').slice(0, 8);
+        if (!edge.targetHandle) {
+          const msg = `Cannot delete edge ${shortSrc} → ${shortTgt}: missing named targetHandle`;
+          console.warn('[Canvas]', msg);
+          logEvent('edge', 'warn', msg);
+          continue;
+        }
+
+        try {
+          const response = await fetch(
+            `/api/graphs/${graphId}/nodes/${edge.target}/connections/${encodeURIComponent(edge.targetHandle)}`,
+            { method: 'DELETE' }
+          );
+          if (!response.ok) {
+            console.error(
+              `[Canvas] Failed to delete connection ${edge.id}:`,
+              response.statusText
+            );
+            logEvent('edge', 'error', `Failed to delete edge ${shortSrc} → ${shortTgt}.${edge.targetHandle}`, response.statusText);
+          } else {
+            logEvent('edge', 'success', `Disconnected ${shortSrc} → ${shortTgt}.${edge.targetHandle}`);
+          }
+        } catch (err) {
+          console.error(`[Canvas] Error deleting connection ${edge.id}:`, err);
+          logEvent('edge', 'error', `Error deleting edge ${shortSrc} → ${shortTgt}`, (err as Error).message);
+        }
+      }
+    },
+    [graphId]
+  );
+
+  // Handle node drag (no-op, position tracked by ReactFlow internally)
+  const onNodeDrag = useCallback(
+    (_event: React.MouseEvent, _node: Node) => {
+      // Intentionally empty — ReactFlow handles live position updates
+    },
+    []
+  );
+
+  // Handle node drag end (save position to backend)
+  const onNodeDragStop = useCallback(
+    async (_event: React.MouseEvent, node: Node) => {
+      if (!graphId || !node.position) return;
+      // Only persist position for regular nodes (not groups or comments)
+      if (node.type !== 'custom') return;
+      try {
+        await api.updateNode(graphId, node.id, {
+          position: { x: node.position.x, y: node.position.y },
+        });
+      } catch (error) {
+        console.error('Error saving node position:', error);
+      }
+    },
+    [graphId]
+  );
+
+  // Handle canvas click (deselect)
+  const onPaneClick = useCallback(() => {
+    selectNode(null);
+  }, [selectNode]);
+
+  // Handle double-click on canvas — open node picker at cursor (ComfyUI-style)
+  const onDoubleClick = useCallback((event: React.MouseEvent) => {
+    setNodeCreatorParentId(undefined);
+    setNodeCreatorPosition({ x: event.clientX, y: event.clientY });
+    setNodeCreatorOpen(true);
+  }, []);
+
+  // Handle canvas right-click (context menu)
+  const onPaneContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: event.clientX,
+      y: event.clientY,
+      type: 'canvas',
+    });
+  }, []);
+
+  // Handle node right-click (context menu)
+  const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
+    event.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: event.clientX,
+      y: event.clientY,
+      type: 'node',
+      nodeId: node.id,
+    });
+  }, []);
+
+  // Close context menu
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  // Context menu action handlers
+  const handleAddNode = useCallback(() => {
+    setNodeCreatorParentId(undefined);
+    setNodeCreatorPosition(contextMenu ? { x: contextMenu.x, y: contextMenu.y } : undefined);
+    setNodeCreatorOpen(true);
+    closeContextMenu();
+  }, [closeContextMenu, contextMenu]);
+
+  const handleAddComment = useCallback(async () => {
+    if (!contextMenu) {
+      closeContextMenu();
+      return;
+    }
+
+    if (!graphId) return;
+
+    try {
+      // Get the canvas position where user right-clicked
+      const canvasPosition = reactFlowInstance.screenToFlowPosition({
+        x: contextMenu.x,
+        y: contextMenu.y,
+      });
+
+      console.log('Creating comment at position:', canvasPosition);
+
+      const content = prompt('Enter comment text:');
+      if (!content || !content.trim()) {
+        closeContextMenu();
+        return;
+      }
+
+      // Create comment via API
+      await api.createComment(graphId, {
+        content: content.trim(),
+        author: 'human',
+        position: {
+          x: canvasPosition.x,
+          y: canvasPosition.y,
+        },
+      });
+
+      console.log('Comment created successfully');
+      closeContextMenu();
+
+      // Reload to show new comment
+      refreshGraph();
+    } catch (error) {
+      console.error('Error creating comment:', error);
+      console.error('Error creating comment:', error);
+      closeContextMenu();
+    }
+  }, [contextMenu, graphId, closeContextMenu, reactFlowInstance, refreshGraph]);
+
+  const handleCreateGroup = useCallback(async () => {
+    if (selectedNodes.length === 0) {
+      console.warn('Cannot create group: no nodes selected');
+      closeContextMenu();
+      return;
+    }
+
+    if (!graphId) return;
+
+    try {
+      const label = prompt('Enter group name:');
+      if (!label || !label.trim()) {
+        closeContextMenu();
+        return;
+      }
+
+      console.log('Creating group with selected nodes:', selectedNodes);
+
+      // Create group via API
+      await api.createGroup(graphId, {
+        label: label.trim(),
+        kind: 'cluster',
+        pinned_nodes: selectedNodes,
+        color: '#E3F2FD', // Default blue
+      });
+
+      console.log('Group created successfully');
+      closeContextMenu();
+
+      // Reload to show new group
+      refreshGraph();
+    } catch (error) {
+      console.error('Error creating group:', error);
+      console.error('Error creating group:', error);
+      closeContextMenu();
+    }
+  }, [selectedNodes, graphId, closeContextMenu, refreshGraph]);
+
+  const handleEditNode = useCallback(() => {
+    if (contextMenu?.nodeId) {
+      setNodeBeingEdited(contextMenu.nodeId);
+      setNodeEditorOpen(true);
+      closeContextMenu();
+    }
+  }, [contextMenu, closeContextMenu]);
+
+  const handleViewHistory = useCallback(() => {
+    if (contextMenu?.nodeId) {
+      setVersionHistoryNodeId(contextMenu.nodeId);
+      setVersionHistoryOpen(true);
+      closeContextMenu();
+    }
+  }, [contextMenu, closeContextMenu]);
+
+  // Ask LLM context menu entry: selects the node so DetailPanel opens with
+  // its Generate button. The orchestrator path in DetailPanel handles the
+  // actual execution — there's no separate dialog anymore.
+  const handleAskLLM = useCallback(() => {
+    if (!contextMenu?.nodeId) return;
+    selectNode(contextMenu.nodeId);
+    closeContextMenu();
+  }, [contextMenu, selectNode, closeContextMenu]);
+
+  const handleDeleteNode = useCallback(async () => {
+    if (!contextMenu?.nodeId || !graphId) return;
+
+    const nodeToDelete = graphData?.nodes[contextMenu.nodeId];
+    if (!nodeToDelete) return;
+
+    // Show confirmation dialog
+    const confirmed = window.confirm(
+      `Are you sure you want to delete this ${nodeToDelete.type} node?\n\n` +
+      `"${nodeToDelete.content.substring(0, 100)}${nodeToDelete.content.length > 100 ? '...' : ''}"\n\n` +
+      `This action cannot be undone.`
+    );
+
+    if (!confirmed) {
+      closeContextMenu();
+      return;
+    }
+
+    const shortId = contextMenu.nodeId.slice(0, 8);
+    const typeLabel = nodeToDelete.class_type || nodeToDelete.type || 'node';
+    try {
+      console.log('Deleting node via API:', contextMenu.nodeId);
+      await api.deleteNode(graphId, contextMenu.nodeId);
+      console.log('Node deleted successfully');
+      logEvent('node', 'success', `Deleted ${typeLabel} node ${shortId}`);
+
+      closeContextMenu();
+
+      // Force reload graph data to show updated graph
+      refreshGraph();
+    } catch (error) {
+      console.error('Error deleting node:', error);
+      logEvent('node', 'error', `Failed to delete node ${shortId}`, (error as Error).message);
+      closeContextMenu();
+    }
+  }, [contextMenu, graphData, graphId, closeContextMenu, refreshGraph]);
+
+  const handleAddChildNode = useCallback(() => {
+    if (contextMenu?.nodeId) {
+      setNodeCreatorParentId(contextMenu.nodeId);
+      setNodeCreatorPosition(contextMenu ? { x: contextMenu.x, y: contextMenu.y } : undefined);
+      setNodeCreatorOpen(true);
+    }
+  }, [contextMenu]);
+
+  // Create an empty child node (for ChatGPT-like conversation flow)
+  const handleCreateChildFromPanel = useCallback(async (parentId: string) => {
+    if (!graphId || !graphData) return;
+    const parentNode = graphData.nodes[parentId];
+    if (!parentNode) return;
+
+    try {
+      const createdNode = await api.createNode(graphId, {
+        type: parentNode.type || 'note',
+        content: '',
+        importance: 0.5,
+        tags: [],
+        status: 'draft',
+        parent_ids: [parentId],
+        provider_id: (parentNode as any).provider_id || undefined,
+      });
+
+      // Position below parent
+      const parentPos = parentNode.meta?.position || { x: 100, y: 100 };
+      const newPos = { x: parentPos.x, y: parentPos.y + 150 };
+      await api.updateNode(graphId, createdNode.id, { position: newPos } as any).catch(() => {});
+
+      const nodeForTransform = {
+        id: createdNode.id,
+        type: createdNode.type || parentNode.type,
+        author: 'human',
+        content: '',
+        children: [],
+        parents: [parentId],
+        meta: { position: newPos, status: 'draft', importance: 0.5, ...(createdNode.meta || {}) },
+        llm_response: null,
+        provider_id: (parentNode as any).provider_id || null,
+      };
+
+      const visualNode = transformNode(nodeForTransform as any);
+      const newReactFlowNode = visualNodeToReactFlowNode(visualNode, nodeForTransform as any, graphId);
+      newReactFlowNode.position = newPos;
+
+      setLocalNodes((prev) => [...prev, newReactFlowNode]);
+      setLocalEdges((prev) => [
+        ...prev,
+        { id: `${parentId}-${createdNode.id}`, source: parentId, target: createdNode.id },
+      ]);
+
+      // Select the new node so the panel switches to it
+      selectNode(createdNode.id);
+    } catch (err) {
+      console.error('Failed to create child node:', err);
+    }
+  }, [graphId, graphData, selectNode]);
+
+  // Handle ComfyUI-style node creation: user picked a node type from the palette
+  const handleNodeTypeSelected = useCallback(
+    async (classType: string) => {
+      if (!graphId) return;
+      try {
+        // Calculate canvas position from the right-click / picker position
+        let canvasPos = { x: 100, y: 100 };
+        if (nodeCreatorPosition) {
+          canvasPos = reactFlowInstance.screenToFlowPosition({
+            x: nodeCreatorPosition.x,
+            y: nodeCreatorPosition.y,
+          });
+        }
+
+        const createdNode = await api.createNode(graphId, {
+          type: classType,
+          content: '',
+          importance: 0.5,
+          tags: [],
+          status: 'draft',
+          parent_ids: nodeCreatorParentId ? [nodeCreatorParentId] : [],
+        });
+        logEvent('node', 'success', `Created ${classType} node ${createdNode.id.slice(0, 8)}`);
+
+        // Build a Node-shaped object for the transform pipeline
+        const nodeForTransform = {
+          id: createdNode.id,
+          type: classType,
+          class_type: classType,
+          author: createdNode.author || 'human',
+          content: '',
+          children: createdNode.children || [],
+          parents: createdNode.parents || (nodeCreatorParentId ? [nodeCreatorParentId] : []),
+          meta: {
+            ...(createdNode.meta || {}),
+            // Position from cursor — must come AFTER spread to avoid being overwritten by null
+            position: canvasPos,
+            status: createdNode.meta?.status || 'draft',
+            importance: createdNode.meta?.importance ?? 0.5,
+          },
+          llm_response: null,
+        };
+
+        // Transform through the same pipeline as loaded nodes
+        const visualNode = transformNode(nodeForTransform as any);
+        const newReactFlowNode = visualNodeToReactFlowNode(visualNode, nodeForTransform as any, graphId);
+        newReactFlowNode.position = canvasPos;
+        newReactFlowNode.data.isNewNode = true;
+        newReactFlowNode.data.class_type = classType;
+
+        setLocalNodes((prev) => [...prev, newReactFlowNode]);
+
+        if (nodeCreatorParentId) {
+          setLocalEdges((prev) => [
+            ...prev,
+            {
+              id: `${nodeCreatorParentId}-${createdNode.id}`,
+              source: nodeCreatorParentId,
+              target: createdNode.id,
+            },
+          ]);
+        }
+
+        // Select the new node to open DetailPanel
+        selectNode(createdNode.id);
+
+        // Clear isNewNode flag after delay
+        setTimeout(() => {
+          setLocalNodes((prev) =>
+            prev.map((node) =>
+              node.id === createdNode.id
+                ? { ...node, data: { ...node.data, isNewNode: false } }
+                : node
+            )
+          );
+        }, 1000);
+      } catch (error) {
+        console.error('Error creating node:', error);
+        logEvent('node', 'error', `Failed to create node`, (error as Error).message);
+      }
+    },
+    [graphId, nodeCreatorParentId, nodeCreatorPosition, reactFlowInstance, selectNode]
+  );
+
+  // Handle NodeEditor save
+  const handleNodeEditorSave = useCallback(async (nodeId: string, updates: {
+    type?: string;
+    status?: string;
+    collapsed?: boolean;
+    summary?: string;
+  }) => {
+    if (!graphId) return;
+    try {
+      console.log('Updating node via NodeEditor:', nodeId, updates);
+      await api.updateNode(graphId, nodeId, updates);
+      refreshGraph();
+    } catch (error) {
+      console.error('Error updating node:', error);
+    }
+  }, [graphId, refreshGraph]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Prevent if user is typing in an input
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      const PAN_STEP = 50; // pixels to pan per arrow key press
+
+      // Ctrl+Z: Undo reorganization
+      if (event.key === 'z' && (event.ctrlKey || event.metaKey) && !event.shiftKey) {
+        event.preventDefault();
+        if (canUndo) {
+          undoReorganize();
+        }
+        return;
+      }
+
+      // Ctrl+Y or Ctrl+Shift+Z: Redo reorganization
+      if (
+        (event.key === 'y' && (event.ctrlKey || event.metaKey)) ||
+        (event.key === 'z' && (event.ctrlKey || event.metaKey) && event.shiftKey)
+      ) {
+        event.preventDefault();
+        if (canRedo) {
+          redoReorganize();
+        }
+        return;
+      }
+
+      // Ctrl+N: Create new canvas
+      if (event.key === 'n' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        const canvasCount = canvases.length;
+        const defaultName = `Untitled Canvas ${canvasCount + 1}`;
+        createCanvas(defaultName).catch(console.error);
+        return;
+      }
+
+      switch (event.key) {
+        case 'Escape':
+          selectNode(null);
+          break;
+
+        case '+':
+        case '=':
+          event.preventDefault();
+          zoomIn();
+          break;
+
+        case '-':
+        case '_':
+          event.preventDefault();
+          zoomOut();
+          break;
+
+        case 'ArrowUp':
+          event.preventDefault();
+          reactFlowInstance.setViewport({
+            ...reactFlowInstance.getViewport(),
+            y: reactFlowInstance.getViewport().y + PAN_STEP,
+          });
+          break;
+
+        case 'ArrowDown':
+          event.preventDefault();
+          reactFlowInstance.setViewport({
+            ...reactFlowInstance.getViewport(),
+            y: reactFlowInstance.getViewport().y - PAN_STEP,
+          });
+          break;
+
+        case 'ArrowLeft':
+          event.preventDefault();
+          reactFlowInstance.setViewport({
+            ...reactFlowInstance.getViewport(),
+            x: reactFlowInstance.getViewport().x + PAN_STEP,
+          });
+          break;
+
+        case 'ArrowRight':
+          event.preventDefault();
+          reactFlowInstance.setViewport({
+            ...reactFlowInstance.getViewport(),
+            x: reactFlowInstance.getViewport().x - PAN_STEP,
+          });
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectNode, zoomIn, zoomOut, reactFlowInstance, canvases, createCanvas, undoReorganize, redoReorganize, canUndo, canRedo]);
+
+  // No canvas selected state
+  if (!activeCanvasId) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          width: '100%',
+          height: '100vh',
+        }}
+      >
+        <CanvasNavigator onSettings={() => setSettingsPanelOpen(true)} onImport={() => setImportDialogOpen(true)} />
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'column',
+          gap: '0',
+          background: 'var(--canvas-bg)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}>
+          {/* Watermark logo */}
+          <img
+            src="/logo.png"
+            alt=""
+            draggable={false}
+            style={{
+              width: '180px',
+              height: '180px',
+              objectFit: 'contain',
+              opacity: 0.10,
+              userSelect: 'none',
+              pointerEvents: 'none',
+              filter: preferences.theme === 'dark' ? 'brightness(2.5) saturate(0.5)' : 'saturate(0.4)',
+            }}
+          />
+
+          <div style={{
+            marginTop: '12px',
+            fontSize: '20px',
+            fontWeight: 700,
+            color: 'var(--node-text)',
+            opacity: 0.10,
+            letterSpacing: '-0.5px',
+            userSelect: 'none',
+          }}>
+            MindFlow
+          </div>
+
+          <div style={{
+            marginTop: '28px',
+            color: 'var(--node-text-muted)',
+            fontSize: '14px',
+            textAlign: 'center',
+            lineHeight: 1.6,
+          }}>
+            Select a canvas or create a new one
+          </div>
+        </div>
+        {settingsPanelOpen && (
+          <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
+        )}
+      </div>
+    );
+  }
+
+  // Loading state — only show when actually loading a graph, not during canvas CRUD
+  if (isLoading && graphId) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          width: '100%',
+          height: '100vh',
+        }}
+      >
+        <CanvasNavigator onSettings={() => setSettingsPanelOpen(true)} onImport={() => setImportDialogOpen(true)} />
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--canvas-bg)',
+          color: 'var(--node-text-muted)',
+          fontSize: '14px',
+        }}>
+          Loading canvas...
+        </div>
+        {settingsPanelOpen && (
+          <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
+        )}
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          width: '100%',
+          height: '100vh',
+        }}
+      >
+        <CanvasNavigator onSettings={() => setSettingsPanelOpen(true)} onImport={() => setImportDialogOpen(true)} />
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'column',
+          gap: '12px',
+          background: 'var(--canvas-bg)',
+        }}>
+          <div style={{ color: 'var(--danger-color)', fontSize: '16px', fontWeight: 600 }}>Error loading graph</div>
+          <div style={{ color: 'var(--node-text-muted)', fontSize: '14px' }}>{error}</div>
+        </div>
+        {settingsPanelOpen && (
+          <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        width: '100%',
+        height: '100vh',
+      }}
+    >
+      {/* Canvas Navigator Sidebar */}
+      <CanvasNavigator onSettings={() => setSettingsPanelOpen(true)} onImport={() => setImportDialogOpen(true)} />
+
+      {/* Main Canvas Area */}
+      <div
+        style={{
+          flex: 1,
+          height: '100vh',
+          touchAction: 'none', // Prevent browser default touch behaviors
+        }}
+        role="application"
+        aria-label="Interactive node canvas for reasoning graphs"
+      >
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          onNodesChange={onNodesChange}
+          onNodeClick={onNodeClick}
+          onNodeDoubleClick={onNodeDoubleClick}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          onPaneClick={onPaneClick}
+          onDoubleClick={onDoubleClick}
+          onMove={onMove}
+          onPaneContextMenu={onPaneContextMenu}
+          onNodeContextMenu={onNodeContextMenu}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+          fitView={preferences.autoFitOnLoad}
+          // Touch & Mouse Configuration
+          panOnDrag={[1, 2]}      // Middle/right mouse button for panning (left for node drag)
+          panOnScroll={false}     // Disabled: scroll is used for zoom (better UX)
+          zoomOnScroll={true}     // Mouse wheel zoom on desktop
+          zoomOnPinch={true}      // Pinch-to-zoom on touch devices
+          zoomOnDoubleClick={false} // Disabled: node double-click opens editor
+          nodesDraggable={true}     // Enable node dragging with left mouse button
+          nodesConnectable={true}   // Enable edge creation with type validation
+          onConnect={onConnect}
+          onEdgesDelete={onEdgesDelete}
+          onEdgeMouseEnter={onEdgeMouseEnter}
+          onEdgeMouseMove={onEdgeMouseMove}
+          onEdgeMouseLeave={onEdgeMouseLeave}
+          isValidConnection={isValidConnection}
+          elementsSelectable={true} // Allow selecting elements
+          selectNodesOnDrag={false} // Don't select on drag (allows node movement)
+          // Selection Configuration
+          multiSelectionKeyCode="Shift" // Shift for multi-selection
+          selectionOnDrag={true}        // Enable selection box on Shift+drag
+          // Performance Optimizations
+          onlyRenderVisibleElements={true} // Viewport culling for large graphs
+          attributionPosition="bottom-right"
+        >
+          {/* Grid background */}
+          {preferences.gridVisible && (
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={preferences.gridSize}
+              size={1}
+              color="#90A4AE"
+            />
+          )}
+
+          {/* Zoom controls */}
+          <Controls showInteractive={false} />
+
+          {/* Minimap */}
+          {preferences.minimapVisible && (
+            <MiniMap
+              nodeColor="#1976D2"
+              maskColor="rgba(0, 0, 0, 0.1)"
+              position="bottom-right"
+              style={{ marginBottom: 50 }}
+              zoomable
+              pannable
+            />
+          )}
+
+          {/* Zoom level display */}
+          <Panel position="top-left" style={{
+            backgroundColor: 'var(--panel-bg)',
+            padding: '8px 12px',
+            borderRadius: '4px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            fontSize: '14px',
+            fontWeight: 500,
+            color: 'var(--node-text)',
+          }}>
+            {formatZoomPercentage(currentZoom)}
+          </Panel>
+
+          {/* Brand bar */}
+          <Panel position="top-center" style={{
+            backgroundColor: 'var(--panel-bg)',
+            color: 'var(--node-text)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '6px 12px',
+            borderRadius: '6px',
+            boxShadow: 'var(--shadow-md)',
+          }}>
+            <img src="/logo.png" alt="MindFlow" style={{ width: 22, height: 22, objectFit: 'contain' }} draggable={false} />
+            <span style={{ fontWeight: 700, letterSpacing: '-0.3px' }}>MindFlow</span>
+          </Panel>
+
+          {/* Toolbar buttons */}
+          <Panel position="top-right" style={{
+            backgroundColor: 'var(--panel-bg)',
+            padding: '8px',
+            borderRadius: '4px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+            display: 'flex',
+            gap: '8px',
+          }}>
+            {/* Reorganize button */}
+            <button
+              onClick={handleReorganize}
+              disabled={isReorganizing}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: isReorganizing ? 'wait' : 'pointer',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                color: isReorganizing ? 'var(--node-text-muted)' : 'var(--node-text-secondary)',
+                opacity: isReorganizing ? 0.5 : 1,
+              }}
+              aria-label={isReorganizing ? 'Reorganizing canvas...' : 'Reorganize canvas layout'}
+              title={isReorganizing ? 'Reorganizing...' : 'Reorganize canvas layout'}
+            >
+              <RefreshCw size={20} className={isReorganizing ? 'spin' : ''} />
+            </button>
+
+            {/* Undo button */}
+            <button
+              onClick={undoReorganize}
+              disabled={!canUndo}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: canUndo ? 'pointer' : 'not-allowed',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                color: 'var(--node-text-secondary)',
+                opacity: canUndo ? 1 : 0.3,
+              }}
+              aria-label="Undo reorganization (Ctrl+Z)"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo size={20} />
+            </button>
+
+            {/* Redo button */}
+            <button
+              onClick={redoReorganize}
+              disabled={!canRedo}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: canRedo ? 'pointer' : 'not-allowed',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                color: 'var(--node-text-secondary)',
+                opacity: canRedo ? 1 : 0.3,
+              }}
+              aria-label="Redo reorganization (Ctrl+Y)"
+              title="Redo (Ctrl+Y)"
+            >
+              <Redo size={20} />
+            </button>
+
+            {/* Settings button */}
+            <button
+              onClick={() => setSettingsPanelOpen(true)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                color: 'var(--node-text-secondary)',
+              }}
+              aria-label="Open settings"
+            >
+              <Settings size={20} />
+            </button>
+          </Panel>
+        </ReactFlow>
+
+        {/* Bottom log panel — collapsible dock that surfaces execution
+            events and errors automatically. Fixed-position at the bottom,
+            so it overlays the canvas without affecting React Flow's layout. */}
+        <LogPanel />
+
+        {/* Edge hover tooltip — shows the current value flowing through
+            the connection. Rendered as a fixed-position div that follows
+            the mouse so it never gets clipped by the canvas viewport. */}
+        {edgeTooltip && (
+          <div
+            style={{
+              position: 'fixed',
+              left: edgeTooltip.x,
+              top: edgeTooltip.y,
+              maxWidth: '420px',
+              maxHeight: '280px',
+              overflow: 'auto',
+              padding: '8px 10px',
+              borderRadius: '6px',
+              background: 'rgba(20, 22, 30, 0.96)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: '#E5E7EB',
+              fontSize: '11px',
+              fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+              lineHeight: 1.45,
+              pointerEvents: 'none',
+              zIndex: 10000,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            <div style={{
+              fontSize: '10px',
+              fontWeight: 600,
+              color: '#9CA3AF',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              marginBottom: '4px',
+            }}>
+              {edgeTooltip.title}
+            </div>
+            <div>{edgeTooltip.body}</div>
+          </div>
+        )}
+
+        {/* Detail Panel */}
+        {selectedNode && (
+          <Suspense fallback={<div style={{
+            position: 'fixed',
+            right: 0,
+            top: 0,
+            width: '400px',
+            height: '100vh',
+            background: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '-2px 0 8px rgba(0, 0, 0, 0.1)',
+            zIndex: 1000,
+          }}>Loading...</div>}>
+            <DetailPanel
+              node={selectedNode}
+              graphId={graphId || ''}
+              allNodes={graphData?.nodes || {}}
+              onClose={() => selectNode(null)}
+              onCreateChild={handleCreateChildFromPanel}
+              onSelectNode={(nodeId) => selectNode(nodeId)}
+              onRefreshGraph={refreshGraph}
+            />
+          </Suspense>
+        )}
+
+        {/* Debate Controls - shown when selected node has children */}
+        {selectedNodeId && graphId && selectedNodeHasChildren && (
+          <div style={{
+            position: 'fixed',
+            right: selectedNode ? 410 : 10,
+            bottom: 20,
+            zIndex: 999,
+            minWidth: '200px',
+          }}>
+            <DebateControls
+              graphId={graphId}
+              nodeId={selectedNodeId}
+              hasConnectedChildren={selectedNodeHasChildren}
+            />
+          </div>
+        )}
+
+        {/* Settings Panel */}
+        {settingsPanelOpen && (
+          <SettingsPanel onClose={() => setSettingsPanelOpen(false)} />
+        )}
+
+        {/* Import Conversation Dialog */}
+        {importDialogOpen && graphId && (
+          <ImportConversationDialog
+            graphId={graphId}
+            onClose={() => setImportDialogOpen(false)}
+            onImported={(groupId, nodeCount) => {
+              console.log(`Imported ${nodeCount} nodes, group=${groupId}`);
+              // Invalidate graph cache and re-fetch to show imported nodes
+              useCanvasStore.getState().setGraphData(null);
+            }}
+          />
+        )}
+
+        {/* Context Menu */}
+        {contextMenu && contextMenu.visible && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            type={contextMenu.type}
+            onClose={closeContextMenu}
+            onAddNode={contextMenu.type === 'canvas' ? handleAddNode : undefined}
+            onAddComment={contextMenu.type === 'canvas' ? handleAddComment : undefined}
+            onCreateGroup={contextMenu.type === 'canvas' ? handleCreateGroup : undefined}
+            onEdit={contextMenu.type === 'node' ? handleEditNode : undefined}
+            onDelete={contextMenu.type === 'node' ? handleDeleteNode : undefined}
+            onAddChild={contextMenu.type === 'node' ? handleAddChildNode : undefined}
+            onAskLLM={contextMenu.type === 'node' ? handleAskLLM : undefined}
+            onViewHistory={contextMenu.type === 'node' ? handleViewHistory : undefined}
+            onSettings={contextMenu.type === 'canvas' ? () => setSettingsPanelOpen(true) : undefined}
+            onImportChatGPT={contextMenu.type === 'canvas' ? () => setImportDialogOpen(true) : undefined}
+          />
+        )}
+
+        {/* Node Picker (ComfyUI-style) */}
+        {nodeCreatorOpen && (
+          <NodeCreator
+            onClose={() => setNodeCreatorOpen(false)}
+            onSelect={handleNodeTypeSelected}
+            position={nodeCreatorPosition}
+            parentId={nodeCreatorParentId}
+          />
+        )}
+
+        {/* Node Editor Modal */}
+        {nodeEditorOpen && nodeToEdit && (
+          <NodeEditor
+            node={nodeToEdit}
+            onClose={() => {
+              setNodeEditorOpen(false);
+              setNodeBeingEdited(null);
+            }}
+            onSave={handleNodeEditorSave}
+          />
+        )}
+
+        {/* Version History Panel */}
+        {versionHistoryOpen && versionHistoryNodeId && graphData && graphId && (
+          <VersionHistory
+            graphId={graphId}
+            nodeId={versionHistoryNodeId}
+            currentContent={graphData.nodes[versionHistoryNodeId]?.content || ''}
+            onClose={() => {
+              setVersionHistoryOpen(false);
+              setVersionHistoryNodeId(null);
+            }}
+            onRestore={async () => {
+              // Refresh graph data after restore
+              refreshGraph();
+            }}
+          />
+        )}
+
+      </div>
+    </div>
+  );
+}

@@ -13,8 +13,7 @@ from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, field_validator
-from pydantic import FieldValidationInfo
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class ProviderType(str, Enum):
@@ -75,7 +74,7 @@ class ProviderConfig(BaseModel):
 
     @field_validator("endpoint_url")
     @classmethod
-    def validate_endpoint_url(cls, v: Optional[str], info: "FieldValidationInfo") -> Optional[str]:
+    def validate_endpoint_url(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
         """Endpoint URL is required for endpoint auth method."""
         auth = info.data.get("auth_method")
         ptype = info.data.get("type")

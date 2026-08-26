@@ -2,8 +2,10 @@
  * TypeScript types for MindFlow Graph entities (based on Python backend models)
  */
 
-// Re-export UUID from dedicated file
-export type { UUID } from './uuid';
+// Import UUID for use in this module's own types, and re-export it so
+// consumers can keep importing UUID from here too.
+import type { UUID } from './uuid';
+export type { UUID };
 
 // Legacy node types kept for backward compatibility.
 // New nodes use class_type (string) from the plugin system.
@@ -21,35 +23,6 @@ export type NodeType =
   | string; // Plugin-defined types (e.g., "llm_chat", "text_input")
 
 export type NodeAuthor = 'human' | 'llm' | 'tool';
-
-/**
- * State of a node's LLM operation.
- *
- * Represents the lifecycle of an LLM operation on a node:
- * - idle: No LLM operation in progress
- * - queued: LLM operation queued, waiting for available slot
- * - processing: LLM request sent, waiting for first token
- * - streaming: LLM tokens arriving, content being accumulated
- * - completed: LLM operation finished successfully
- * - failed: LLM operation failed (timeout, error, rate limit)
- * - cancelled: LLM operation cancelled by user
- *
- * State Transitions:
- *   idle → queued → processing → streaming → completed
- *                                            ↓
- *                                          failed
- *                                            ↓
- *                                        cancelled (from any state)
- */
-export enum NodeState {
-  IDLE = 'idle',
-  QUEUED = 'queued',
-  PROCESSING = 'processing',
-  STREAMING = 'streaming',
-  COMPLETED = 'completed',
-  FAILED = 'failed',
-  CANCELLED = 'cancelled'
-}
 
 export type NodeStatus = 'draft' | 'valid' | 'invalid' | 'final' | 'experimental';
 
@@ -82,9 +55,8 @@ export interface Node {
   connections?: Record<string, { source_node_id: string; output_name: string }>;
   provider_id?: string | null;
 
-  // Feature 009: Inline LLM Response Display
+  // Inline LLM Response Display
   llm_response?: string | null;
-  llm_operation_id?: UUID | null;
   font_size?: number; // 10-24, default 14
   node_width?: number; // 280-800, default 400
   node_height?: number; // 200-1200, default 400

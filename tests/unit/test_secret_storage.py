@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from mindflow.models.provider import ProviderCredentials
-from mindflow.services.secret_storage import SecretStorage
+from mindflow.services.auth.secret_storage import SecretStorage
 
 
 @pytest.fixture

@@ -161,6 +161,17 @@ export interface UIPreferences {
 }
 
 /**
+ * Compute the first-run default theme from the OS preference.
+ * Guarded for environments without matchMedia (SSR / some test runners).
+ */
+export function getSystemDefaultTheme(): 'light' | 'dark' {
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return 'light';
+}
+
+/**
  * Default UI preferences
  */
 export const defaultPreferences: UIPreferences = {
@@ -168,6 +179,6 @@ export const defaultPreferences: UIPreferences = {
   gridVisible: true,
   gridSize: 50,
   snapToGrid: false,
-  theme: 'light',
+  theme: getSystemDefaultTheme(),
   autoFitOnLoad: true,
 };

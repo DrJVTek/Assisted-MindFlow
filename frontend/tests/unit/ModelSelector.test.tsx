@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { ModelSelector, type ModelInfo } from '../../src/components/ModelSelector';
+import { ModelSelector, type ModelInfo } from '../../src/features/providers/components/ModelSelector';
 
 const sampleModels: ModelInfo[] = [
   { id: 'gpt-4o', name: 'GPT-4o', available: true },

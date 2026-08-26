@@ -5,7 +5,6 @@ and metadata for a reasoning graph.
 """
 
 from datetime import UTC, datetime
-from enum import Enum
 from typing import Dict, Optional
 from uuid import UUID, uuid4
 
@@ -14,59 +13,6 @@ from pydantic import BaseModel, Field
 from mindflow.models.node import Node
 from mindflow.models.group import Group
 from mindflow.models.comment import Comment
-
-
-class NodeState(str, Enum):
-    """State of a node's LLM operation.
-
-    Represents the lifecycle of an LLM operation on a node:
-    - idle: No LLM operation in progress
-    - queued: LLM operation queued, waiting for available slot
-    - processing: LLM request sent, waiting for first token
-    - streaming: LLM tokens arriving, content being accumulated
-    - completed: LLM operation finished successfully
-    - failed: LLM operation failed (timeout, error, rate limit)
-    - cancelled: LLM operation cancelled by user
-
-    State Transitions:
-        idle → queued → processing → streaming → completed
-                                                ↓
-                                              failed
-                                                ↓
-                                            cancelled (from any state)
-    """
-
-    IDLE = "idle"
-    QUEUED = "queued"
-    PROCESSING = "processing"
-    STREAMING = "streaming"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class NodeExecutionState(str, Enum):
-    """Execution caching state for dirty/clean tracking.
-
-    Orthogonal to NodeState (which tracks LLM streaming lifecycle).
-    This enum tracks whether a node's cached output is still valid.
-
-    State Transitions:
-        DIRTY → EXECUTING → CLEAN
-                    ↓
-                 FAILED → DIRTY (retry via mark_dirty)
-
-    Dirty Propagation:
-        - User edits node content/inputs → mark DIRTY
-        - Node marked DIRTY → all descendants become DIRTY
-        - Node execution completes → mark CLEAN, store output in cache
-        - Node execution fails → mark FAILED, skip downstream
-    """
-
-    DIRTY = "dirty"
-    CLEAN = "clean"
-    EXECUTING = "executing"
-    FAILED = "failed"
 
 
 class GraphMetadata(BaseModel):

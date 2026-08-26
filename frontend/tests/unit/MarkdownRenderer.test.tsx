@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MarkdownRenderer } from '../../src/components/MarkdownRenderer';
+import { MarkdownRenderer } from '../../src/features/nodes/components/MarkdownRenderer';
 
 describe('MarkdownRenderer', () => {
   describe('Basic Markdown Rendering', () => {

@@ -105,10 +105,9 @@ class Node(BaseModel):
     provider_id: Optional[UUID] = None  # Reference to ProviderConfig; null = default provider
     mcp_tools: list[str] = Field(default_factory=list)  # MCP tool names attached to this node
 
-    # Feature 009: Inline LLM Response Display
+    # Inline LLM Response Display
     llm_response: Optional[str] = Field(None, max_length=100000)
-    llm_operation_id: Optional[UUID] = None
-    
+
     # Inline LLM Workflow: Dual-zone interface
     prompt_height: int = Field(150, ge=100, le=600)  # Prompt zone height (px)
     response_height: int = Field(250, ge=100, le=800)  # Response zone height (px)

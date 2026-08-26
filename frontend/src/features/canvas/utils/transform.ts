@@ -6,6 +6,7 @@
 import type { Graph, Node } from '../../../types/graph';
 import type { VisualNode, ConnectionLine } from '../../../types/canvas';
 import { getNodeStyle } from './styling';
+import { useNodeTypesStore } from '../../../stores/nodeTypesStore';
 
 /**
  * Fixed node dimensions (from data-model.md)
@@ -73,7 +74,8 @@ export function transformNodesToVisual(
  */
 export function createConnectionLine(
   parentId: string,
-  childId: string
+  childId: string,
+  stroke: string = '#64748b'
 ): ConnectionLine {
   return {
     id: `${parentId}-${childId}`,
@@ -81,13 +83,42 @@ export function createConnectionLine(
     target: childId,
     path: '', // React Flow auto-generates path
     style: {
-      stroke: '#90A4AE', // Default grey
+      stroke,
       strokeWidth: 2,
-      opacity: 0.6,
+      opacity: 0.85,
       animated: false,
     },
     markerEnd: 'url(#arrow)',
   };
+}
+
+/**
+ * Resolve an edge's color from the SOURCE node's output port type, so links
+ * are tinted by data type like ComfyUI. Falls back to a neutral slate when
+ * the node-type metadata hasn't loaded yet (graceful, never throws).
+ */
+function resolveOutputColor(
+  sourceNode: Node | undefined,
+  outputName: string | undefined
+): string {
+  const fallback = '#64748b'; // slate-500
+  if (!sourceNode || !outputName) return fallback;
+  try {
+    const store = useNodeTypesStore.getState();
+    const classType = (sourceNode as any).class_type || sourceNode.type;
+    const def = classType ? store.nodeTypes[classType] : undefined;
+    if (def) {
+      const names = (def as any).return_names || [];
+      const types = (def as any).return_types || [];
+      const idx = names.indexOf(outputName);
+      if (idx >= 0 && types[idx]) {
+        return store.getTypeColor(types[idx]) || fallback;
+      }
+    }
+  } catch {
+    // node-type store not ready — neutral fallback
+  }
+  return fallback;
 }
 
 /**
@@ -98,36 +129,23 @@ export function transformNodesToConnections(
 ): ConnectionLine[] {
   const connections: ConnectionLine[] = [];
 
-  // Track which parent-child pairs already have named connections
-  const namedEdges = new Set<string>();
-
-  // First: create edges from explicit named connections (ComfyUI-style ports)
+  // Edges are derived exclusively from the `connections` dict (ComfyUI-style
+  // named ports). The legacy parents/children fallback has been removed —
+  // an edge without a named connection cannot exist in the UI anymore,
+  // because otherwise deleting it would leave a phantom that reappears on
+  // every page refresh.
   Object.values(nodes).forEach(node => {
-    if (node.connections) {
-      for (const [inputName, connSpec] of Object.entries(node.connections)) {
-        if (connSpec && connSpec.source_node_id) {
-          const edgeKey = `${connSpec.source_node_id}-${node.id}`;
-          namedEdges.add(edgeKey);
-          const conn = createConnectionLine(connSpec.source_node_id, node.id);
-          // Override ID to include port names for uniqueness
-          conn.id = `${connSpec.source_node_id}:${connSpec.output_name}-${node.id}:${inputName}`;
-          // Attach handle info (used in connectionLineToReactFlowEdge)
-          (conn as any).sourceHandle = connSpec.output_name;
-          (conn as any).targetHandle = inputName;
-          connections.push(conn);
-        }
+    if (!node.connections) return;
+    for (const [inputName, connSpec] of Object.entries(node.connections)) {
+      if (connSpec && connSpec.source_node_id) {
+        const stroke = resolveOutputColor(nodes[connSpec.source_node_id], connSpec.output_name);
+        const conn = createConnectionLine(connSpec.source_node_id, node.id, stroke);
+        conn.id = `${connSpec.source_node_id}:${connSpec.output_name}-${node.id}:${inputName}`;
+        (conn as any).sourceHandle = connSpec.output_name;
+        (conn as any).targetHandle = inputName;
+        connections.push(conn);
       }
     }
-  });
-
-  // Second: create fallback edges for parent-child relationships without named connections
-  Object.values(nodes).forEach(node => {
-    node.children.forEach(childId => {
-      const edgeKey = `${node.id}-${childId}`;
-      if (!namedEdges.has(edgeKey)) {
-        connections.push(createConnectionLine(node.id, childId));
-      }
-    });
   });
 
   return connections;
@@ -203,12 +221,11 @@ export function visualNodeToReactFlowNode(
       borderWidth: visualNode.style.borderWidth,
       opacity: visualNode.style.opacity,
 
-      // Feature 009: Pass through LLM fields for auto-launch and inline display
+      // Pass through LLM fields for inline display
       graphId: graphId,
       content: originalNode.content,
       llm_response: originalNode.llm_response,
       llm_status: originalNode.llm_status || 'idle',
-      llm_operation_id: originalNode.llm_operation_id,
       font_size: originalNode.font_size,
       node_width: originalNode.node_width,
       node_height: originalNode.node_height,
@@ -230,7 +247,7 @@ export function connectionLineToReactFlowEdge(connection: ConnectionLine): any {
     id: connection.id,
     source: connection.source,
     target: connection.target,
-    type: 'smoothstep',
+    type: 'default',
     style: {
       stroke: connection.style.stroke,
       strokeWidth: connection.style.strokeWidth,

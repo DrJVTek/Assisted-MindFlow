@@ -20,7 +20,7 @@ from mindflow.models.debate import (
     DebateStatus,
     StartDebateRequest,
 )
-from mindflow.services import debate_engine
+from mindflow.services.graph import debate_engine
 from mindflow.api.routes.graphs import get_graph_from_storage
 from mindflow.api.routes.providers import _get_registry
 

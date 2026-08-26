@@ -1,5 +1,12 @@
 # MindFlow Plugin Node Architecture
 
+> **⚠ Partially historical (updated on branch 015):** the dirty/clean execution-state caching and
+> the `POST .../mark-dirty` endpoint described in §5.2/§API below were **removed** — the cache was
+> never wired into the real execution path, so `GraphExecutor` is now a pure topology utility and
+> every execution recomputes the ancestor sub-tree. Incremental recompute remains a future feature
+> (see `docs/ROADMAP.md`). The plugin-registry, node-type, and SSE-contract sections remain accurate
+> (minus the `node_skip` event, which no longer exists).
+
 ## Objectif
 
 Architecture de **plugins dynamiques** inspiree de ComfyUI, ou chaque node type et chaque LLM provider est un plugin auto-descriptif charge au demarrage.

@@ -5,7 +5,7 @@ import 'reactflow/dist/style.css'
 import './features/progress/styles/animations.css'
 import './features/progress/styles/reduced-motion.css'
 import 'highlight.js/styles/github.css'
-import App from './App.tsx'
+import App from './App'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -19,10 +19,9 @@ from mindflow.models.node import Node, NodeType, NodeAuthor, NodeStatus, NodeMet
 from mindflow.models.group import Group, GroupKind, GroupMetadata
 from mindflow.models.comment import Comment, CommentTarget
 from mindflow.models.node_version import NodeVersion, TriggerReason
-from mindflow.utils.cascade import get_affected_nodes
 from mindflow.api.routes.providers import _get_registry
-from mindflow.services.version_storage import get_version_storage
-from mindflow.services.graph_service import GraphService
+from mindflow.services.storage.version_storage import get_version_storage
+from mindflow.services.graph.graph_service import GraphService
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -44,10 +43,80 @@ def add_graph_to_storage(graph: Graph) -> None:
     logger.info(f"Added graph {graph.id} to storage (memory + disk)")
 
 
+# Legacy plugin class_types that were deleted in spec 015 Étape 5.
+# They are all remapped to the generic "llm_chat" node which takes any
+# provider via its provider_id credential.
+_LEGACY_LLM_TYPES = {
+    "openai_chat",
+    "anthropic_chat",
+    "ollama_chat",
+    "gemini_chat",
+    "chatgpt_web_chat",
+}
+
+# Legacy port names used when the fallback __default_in / __default_out
+# handles created edges. Post-Étape 5, llm_chat uses "prompt" for the
+# input port and "response" for the primary output.
+_LEGACY_PORT_RENAMES = {
+    "input": "prompt",
+    "output": "response",
+}
+
+
+def _migrate_legacy_nodes(graph: Graph) -> bool:
+    """Migrate pre-spec-015 nodes to the new plugin schema.
+
+    Old graphs have nodes with `type` set to a provider-specific plugin
+    (e.g. "chatgpt_web_chat") that no longer exists, and `class_type=None`.
+    Without migration these nodes silently fell back to text_input in the
+    orchestrator, which made Generate look like it did nothing.
+
+    This function walks the graph once and:
+      - Sets class_type="llm_chat" for any legacy LLM type
+      - Renames stale connection port names ("input" → "prompt", etc.)
+
+    Returns True if any change was made (so the caller can persist it).
+    """
+    changed = False
+    for node in graph.nodes.values():
+        node_type = getattr(node, "type", None)
+        if node_type in _LEGACY_LLM_TYPES and not getattr(node, "class_type", None):
+            node.class_type = "llm_chat"
+            changed = True
+
+        if node.connections:
+            renamed: dict[str, dict] = {}
+            for input_name, spec in node.connections.items():
+                new_name = _LEGACY_PORT_RENAMES.get(input_name, input_name)
+                # Also rename the output_name inside the spec — the
+                # source node's output port was likely the legacy
+                # __default_out → "output", which is now "response"
+                # for llm_chat.
+                new_spec = dict(spec) if isinstance(spec, dict) else spec
+                if isinstance(new_spec, dict) and "output_name" in new_spec:
+                    old_out = new_spec["output_name"]
+                    new_out = _LEGACY_PORT_RENAMES.get(old_out, old_out)
+                    if new_out != old_out:
+                        new_spec["output_name"] = new_out
+                        changed = True
+                renamed[new_name] = new_spec
+                if new_name != input_name:
+                    changed = True
+            node.connections = renamed
+
+    if changed:
+        logger.info(
+            f"Migrated legacy nodes in graph {graph.id}: "
+            f"class_type + port names updated to post-spec-015 schema"
+        )
+    return changed
+
+
 def get_graph_from_storage(graph_id: UUID) -> Graph | None:
     """Get a graph from memory cache, falling back to disk.
 
-    If found on disk but not in memory, loads into cache.
+    If found on disk but not in memory, loads into cache. Runs a one-time
+    in-place migration for pre-spec-015 nodes before caching.
     """
     graph_id_str = str(graph_id)
 
@@ -58,6 +127,8 @@ def get_graph_from_storage(graph_id: UUID) -> Graph | None:
     # Fall back to disk
     graph = _graph_service.load(graph_id)
     if graph is not None:
+        if _migrate_legacy_nodes(graph):
+            _graph_service.save(graph)
         _graphs_storage[graph_id_str] = graph
         logger.info(f"Loaded graph {graph_id} from disk into memory cache")
         return graph
@@ -84,10 +155,13 @@ def _ensure_graph_loaded(graph_id: str) -> None:
     """Ensure graph is in memory cache, loading from disk if needed.
 
     Call at the start of any endpoint that accesses _graphs_storage directly.
+    Runs a one-time legacy-node migration on first load.
     """
     if graph_id not in _graphs_storage:
         graph = _graph_service.load(UUID(graph_id))
         if graph is not None:
+            if _migrate_legacy_nodes(graph):
+                _graph_service.save(graph)
             _graphs_storage[graph_id] = graph
 
 
@@ -137,6 +211,11 @@ class UpdateNodeRequest(BaseModel):
     # Named port connection (ComfyUI-style: input_name → source_node.output_name)
     connection: ConnectionSpec | None = None
 
+    # Plugin node input values (e.g. model, temperature, max_tokens).
+    # Populated by the DetailPanel's dynamic widget editor. Persisted to
+    # Node.inputs and used by the orchestrator at execution time.
+    inputs: dict | None = None
+
     # Feature 009: Inline LLM Response Display
     llm_response: str | None = Field(None, max_length=100000)
 
@@ -149,7 +228,6 @@ class UpdateNodeRequest(BaseModel):
     note_bottom: str | None = Field(None, max_length=5000)
     collapsed: bool | None = None
     summary: str | None = Field(None, max_length=100)
-    llm_operation_id: UUID | None = None
     font_size: int | None = Field(None, ge=10, le=24)
     node_width: int | None = Field(None, ge=280, le=800)
     node_height: int | None = Field(None, ge=200, le=1200)
@@ -347,6 +425,14 @@ async def update_node(
     # Update fields if provided
     if update_req.content is not None:
         node.content = update_req.content
+    if update_req.inputs is not None:
+        # Merge semantics: new keys override existing, unset keys are kept.
+        # The frontend sends the full updated dict, so this effectively
+        # replaces — but using update() is robust if callers ever send
+        # partial patches.
+        if not isinstance(node.inputs, dict):
+            node.inputs = {}
+        node.inputs.update(update_req.inputs)
     if update_req.importance is not None:
         node.meta.importance = update_req.importance
     if update_req.tags is not None:
@@ -356,11 +442,9 @@ async def update_node(
     if update_req.position is not None:
         node.meta.position = update_req.position
 
-    # Feature 009: Update LLM response fields if provided
+    # Update LLM response field if provided
     if update_req.llm_response is not None:
         node.llm_response = update_req.llm_response
-    if update_req.llm_operation_id is not None:
-        node.llm_operation_id = update_req.llm_operation_id
     if update_req.font_size is not None:
         node.font_size = update_req.font_size
     if update_req.node_width is not None:
@@ -386,41 +470,76 @@ async def update_node(
     if update_req.summary is not None:
         node.summary = update_req.summary
 
-    # Feature 011: Provider and MCP tools
+    # Provider and MCP tools.
+    # Empty string or null clears the provider. A non-empty string is
+    # parsed as a UUID; bad input raises 400 instead of the previous 500.
     if update_req.provider_id is not None:
-        node.provider_id = UUID(update_req.provider_id) if update_req.provider_id else None
+        if update_req.provider_id:
+            try:
+                node.provider_id = UUID(update_req.provider_id)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid provider_id UUID: {update_req.provider_id}",
+                )
+        else:
+            node.provider_id = None
     if update_req.mcp_tools is not None:
         node.mcp_tools = update_req.mcp_tools
 
-    # Add parent relationship (edge creation via onConnect)
+    # Edge creation via onConnect.
+    # A connection MUST be a named ComfyUI-style port connection. The legacy
+    # `parent_id` path is kept as a minimal fallback for bare parent-child
+    # links but no new code should use it. Both paths keep parents/children
+    # in sync with the connections dict as the source of truth.
     if update_req.parent_id is not None:
         try:
             parent_uuid = UUID(update_req.parent_id)
-            if parent_uuid in graph.nodes:
-                if parent_uuid not in node.parents:
-                    node.parents.append(parent_uuid)
-                parent_node = graph.nodes[parent_uuid]
-                if node_uuid not in parent_node.children:
-                    parent_node.children.append(node_uuid)
-            else:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Parent node {update_req.parent_id} not found in graph",
-                )
         except ValueError:
             raise HTTPException(
                 status_code=400, detail=f"Invalid parent_id UUID: {update_req.parent_id}"
             )
+        if parent_uuid not in graph.nodes:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Parent node {update_req.parent_id} not found in graph",
+            )
+        if parent_uuid not in node.parents:
+            node.parents.append(parent_uuid)
+        parent_node = graph.nodes[parent_uuid]
+        if node_uuid not in parent_node.children:
+            parent_node.children.append(node_uuid)
 
-    # Named port connection (ComfyUI-style)
+    # Named port connection (ComfyUI-style, preferred).
+    # Writing this also syncs parents/children so both representations stay
+    # consistent, which is what lets `delete_node_connection` above clean
+    # both sides correctly.
     if update_req.connection is not None:
         conn = update_req.connection
-        if not hasattr(node, "connections") or node.connections is None:
+        if node.connections is None:
             node.connections = {}
         node.connections[conn.input_name] = {
             "source_node_id": conn.source_node_id,
             "output_name": conn.output_name,
         }
+
+        try:
+            source_uuid = UUID(conn.source_node_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid source_node_id UUID: {conn.source_node_id}",
+            )
+        if source_uuid not in graph.nodes:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Source node {conn.source_node_id} not found in graph",
+            )
+        if source_uuid not in node.parents:
+            node.parents.append(source_uuid)
+        source_node = graph.nodes[source_uuid]
+        if node_uuid not in source_node.children:
+            source_node.children.append(node_uuid)
 
     # Update timestamp
     node.update_timestamp()
@@ -441,6 +560,91 @@ async def update_node(
     )
 
     return node
+
+
+@router.delete("/{graph_id}/nodes/{node_id}/connections/{input_name}", status_code=204)
+async def delete_node_connection(
+    graph_id: str, node_id: str, input_name: str
+) -> None:
+    """Remove a named connection from a node's input port.
+
+    Removes the entry from `node.connections[input_name]` AND updates the
+    parents/children bidirectional lists to keep them in sync. If this was
+    the last connection from the source node to this node, the parent-child
+    link is also removed.
+
+    Args:
+        graph_id: UUID of the graph
+        node_id: UUID of the target node (the one receiving the input)
+        input_name: Name of the input port to disconnect
+
+    Raises:
+        HTTPException: 404 if graph/node not found, or input_name has no connection
+    """
+    logger.info(
+        f"DELETE /api/graphs/{graph_id}/nodes/{node_id}/connections/{input_name}"
+    )
+
+    _ensure_graph_loaded(graph_id)
+    if graph_id not in _graphs_storage:
+        raise HTTPException(
+            status_code=404, detail=f"Graph with ID {graph_id} not found"
+        )
+
+    graph = _graphs_storage[graph_id]
+
+    try:
+        node_uuid = UUID(node_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid UUID format: {node_id}")
+
+    if node_uuid not in graph.nodes:
+        raise HTTPException(
+            status_code=404, detail=f"Node with ID {node_id} not found in graph"
+        )
+
+    node = graph.nodes[node_uuid]
+
+    if not node.connections or input_name not in node.connections:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No connection on input '{input_name}' of node {node_id}",
+        )
+
+    # Capture the source node id BEFORE removing the connection
+    source_node_id_str = node.connections[input_name].get("source_node_id")
+    del node.connections[input_name]
+
+    # Check if any other connections still come from the same source
+    # (a parent might feed multiple inputs of the same child)
+    if source_node_id_str:
+        try:
+            source_uuid = UUID(source_node_id_str)
+        except ValueError:
+            source_uuid = None
+
+        if source_uuid is not None:
+            still_connected = any(
+                conn and conn.get("source_node_id") == source_node_id_str
+                for conn in node.connections.values()
+            )
+
+            # If no more connections from this parent, remove the parent/child link
+            if not still_connected:
+                if source_uuid in node.parents:
+                    node.parents.remove(source_uuid)
+                if source_uuid in graph.nodes:
+                    parent_node = graph.nodes[source_uuid]
+                    if node_uuid in parent_node.children:
+                        parent_node.children.remove(node_uuid)
+
+    node.update_timestamp()
+    graph.meta.updated_at = node.meta.updated_at
+    _persist_graph(graph_id)
+
+    logger.info(
+        f"Removed connection on input '{input_name}' of node {node_id}"
+    )
 
 
 @router.delete("/{graph_id}/nodes/{node_id}", status_code=204)
@@ -651,22 +855,6 @@ async def restore_node_version(
     return node
 
 
-class RegenerateCascadeRequest(BaseModel):
-    """Request body for cascade regeneration."""
-    modified_node_id: str = Field(description="UUID of the node that was modified")
-    llm_provider: str = Field(description="LLM provider type (openai, anthropic, ollama, chatgpt_web, gemini)")
-    llm_model: str = Field(description="LLM model identifier")
-
-
-class RegenerateCascadeResponse(BaseModel):
-    """Response for cascade regeneration."""
-    success: bool
-    affected_nodes: List[str]
-    regenerated_count: int
-    errors: List[Dict[str, str]] = Field(default_factory=list)
-    message: str
-
-
 # Group Request/Response Models
 class CreateGroupRequest(BaseModel):
     """Request body for creating a new group."""
@@ -699,169 +887,6 @@ class CreateCommentRequest(BaseModel):
 class UpdateCommentRequest(BaseModel):
     """Request body for updating a comment."""
     content: str = Field(min_length=1, max_length=5000)
-
-
-@router.post("/{graph_id}/regenerate-cascade")
-async def regenerate_cascade(
-    graph_id: str, request: RegenerateCascadeRequest
-) -> RegenerateCascadeResponse:
-    """Regenerate all nodes downstream from a modified node.
-
-    This endpoint implements the cascade regeneration algorithm:
-    1. Find all descendants of the modified node
-    2. Sort them topologically (parents before children)
-    3. For each node, regenerate content using LLM based on parent nodes
-    4. Update node content and timestamp
-
-    Args:
-        graph_id: UUID of the graph
-        request: Cascade regeneration request with modified_node_id and LLM config
-
-    Returns:
-        Response with success status, affected nodes, and any errors
-
-    Raises:
-        HTTPException: 404 if graph or node not found, 400 for validation errors
-    """
-    logger.info(f"POST /api/graphs/{graph_id}/regenerate-cascade - node={request.modified_node_id}")
-
-    _ensure_graph_loaded(graph_id)
-    if graph_id not in _graphs_storage:
-        raise HTTPException(
-            status_code=404, detail=f"Graph with ID {graph_id} not found"
-        )
-
-    graph = _graphs_storage[graph_id]
-
-    # Validate modified node ID
-    try:
-        modified_node_uuid = UUID(request.modified_node_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid UUID format: {request.modified_node_id}"
-        )
-
-    if modified_node_uuid not in graph.nodes:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Modified node {request.modified_node_id} not found in graph",
-        )
-
-    # Get affected nodes in topological order
-    try:
-        affected_node_ids = get_affected_nodes(graph, modified_node_uuid)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Error computing cascade: {str(e)}")
-
-    if not affected_node_ids:
-        logger.info(f"No descendants found for node {request.modified_node_id}")
-        return RegenerateCascadeResponse(
-            success=True,
-            affected_nodes=[],
-            regenerated_count=0,
-            message="No downstream nodes to regenerate",
-        )
-
-    logger.info(
-        f"Found {len(affected_node_ids)} nodes to regenerate in cascade order"
-    )
-
-    # Resolve provider from registry
-    registry = _get_registry()
-    provider = None
-    for p_config in registry.list_providers():
-        if p_config.type.value == request.llm_provider:
-            provider = registry.get_provider_instance(str(p_config.id))
-            if provider:
-                break
-    if provider is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Provider '{request.llm_provider}' not configured. Add it in Provider Settings.",
-        )
-
-    # Regenerate each node in order
-    regenerated_count = 0
-    errors = []
-
-    for node_uuid in affected_node_ids:
-        try:
-            node = graph.nodes[node_uuid]
-
-            # Get parent nodes for context
-            parent_nodes = [
-                graph.nodes[parent_uuid]
-                for parent_uuid in node.parents
-                if parent_uuid in graph.nodes
-            ]
-
-            # Store previous content
-            previous_content = node.content
-
-            # Build context from parents and generate
-            context_parts = []
-            for i, parent in enumerate(parent_nodes, 1):
-                context_parts.append(f"Parent Node {i} ({parent.type}):\n{parent.content}\n")
-            context_text = "\n".join(context_parts)
-            prompt = f"Context:\n{context_text}\n\n"
-            if previous_content:
-                prompt += f"Previous Content:\n{previous_content}\n\n"
-            prompt += f"Generate content for a {node.type} node based on the context."
-
-            response = await provider.generate(
-                prompt=prompt,
-                model=request.llm_model,
-            )
-            new_content = response.content
-
-            # Update node
-            node.content = new_content
-            node.update_timestamp()
-
-            # Create version for cascade regeneration
-            version_storage = get_version_storage()
-            version_storage.create_version(
-                node_id=node_uuid,
-                content=new_content,
-                trigger_reason="parent_cascade",
-                llm_metadata={
-                    "provider": request.llm_provider,
-                    "model": request.llm_model,
-                    "previous_content": previous_content,
-                },
-            )
-
-            regenerated_count += 1
-            logger.info(f"Regenerated node {node_uuid} ({node.type})")
-
-        except Exception as e:
-            error_msg = f"Error regenerating node {node_uuid}: {str(e)}"
-            logger.error(error_msg)
-            errors.append({"node_id": str(node_uuid), "error": str(e)})
-
-    # Update graph timestamp
-    from datetime import UTC, datetime
-    graph.meta.updated_at = datetime.now(UTC)
-    _persist_graph(graph_id)
-
-    success = regenerated_count > 0 and len(errors) == 0
-    message = (
-        f"Successfully regenerated {regenerated_count} nodes"
-        if success
-        else f"Regenerated {regenerated_count} nodes with {len(errors)} errors"
-    )
-
-    logger.info(
-        f"Cascade regeneration complete: {regenerated_count} nodes, {len(errors)} errors"
-    )
-
-    return RegenerateCascadeResponse(
-        success=success,
-        affected_nodes=[str(nid) for nid in affected_node_ids],
-        regenerated_count=regenerated_count,
-        errors=errors,
-        message=message,
-    )
 
 
 # ============================================================================

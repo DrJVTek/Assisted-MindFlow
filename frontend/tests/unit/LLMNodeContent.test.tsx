@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { LLMNodeContent } from '../../src/components/LLMNodeContent';
+import { LLMNodeContent } from '../../src/features/nodes/components/LLMNodeContent';
 
 describe('LLMNodeContent', () => {
   const defaultProps = {

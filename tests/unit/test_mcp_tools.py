@@ -1,4 +1,4 @@
-"""Unit tests for MCP server tool functions in mindflow.services.mcp_server.
+"""Unit tests for MCP server tool functions in mindflow.services.mcp.server.
 
 Tests list_canvases, create_node, read_node, delete_node, update_node
 by calling the async tool functions directly.
@@ -15,8 +15,8 @@ from mindflow.api.routes.graphs import add_graph_to_storage, _graphs_storage
 from mindflow.models.canvas import Canvas
 from mindflow.models.graph import Graph, GraphMetadata
 from mindflow.models.node import Node
-from mindflow.services.canvas_service import CanvasService
-from mindflow.services.mcp_server import (
+from mindflow.services.storage.canvas_service import CanvasService
+from mindflow.services.mcp.server import (
     _canvas_service,
     create_node,
     delete_node,
@@ -37,7 +37,7 @@ def cleanup():
 @pytest.fixture
 def tmp_canvas_service(tmp_path):
     """Create a CanvasService backed by a temporary directory."""
-    import mindflow.services.mcp_server as mcp_mod
+    import mindflow.services.mcp.server as mcp_mod
 
     original = mcp_mod._canvas_service
     temp_service = CanvasService(data_dir=tmp_path)

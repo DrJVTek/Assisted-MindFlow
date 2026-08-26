@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 from pydantic import ValidationError
 
 from mindflow.models.node_version import NodeVersion, TriggerReason
-from mindflow.services.version_storage import VersionStorage, MAX_VERSIONS_PER_NODE
+from mindflow.services.storage.version_storage import VersionStorage, MAX_VERSIONS_PER_NODE
 
 
 class TestNodeVersion:

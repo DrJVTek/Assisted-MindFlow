@@ -13,7 +13,7 @@ REM Check if venv exists
 if not exist "venv\Scripts\activate.bat" (
     echo ERROR: Virtual environment not found!
     echo Please run: python -m venv venv
-    echo Then run: venv\Scripts\pip install -e .
+    echo Then run: venv\Scripts\pip install -e .[dev]
     pause
     exit /b 1
 )

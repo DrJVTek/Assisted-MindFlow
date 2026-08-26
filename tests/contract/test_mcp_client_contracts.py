@@ -9,7 +9,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 
 from mindflow.api.server import app
-from mindflow.services.mcp_client_manager import MCPClientManager
+from mindflow.services.mcp.client_manager import MCPClientManager
 
 
 @pytest.fixture(autouse=True)

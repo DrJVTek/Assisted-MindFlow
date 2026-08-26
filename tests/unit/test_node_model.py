@@ -163,10 +163,14 @@ class TestNode:
             node = Node(type=node_type, author="human", content="Test")
             assert node.type == node_type
 
-    def test_node_invalid_type(self) -> None:
-        """Test invalid node type raises ValidationError."""
-        with pytest.raises(ValidationError):
-            Node(type="invalid_type", author="human", content="Test")  # type: ignore
+    def test_node_accepts_dynamic_plugin_type(self) -> None:
+        """Plugin node types are arbitrary strings (Feature 014).
+
+        NodeType was widened from a closed Literal[...] to `str` so that
+        dynamic plugin class_types (e.g. 'openai_chat') are accepted.
+        """
+        node = Node(type="openai_chat", author="human", content="Test")
+        assert node.type == "openai_chat"
 
     def test_node_author_validation(self) -> None:
         """Test all valid authors are accepted."""
@@ -181,12 +185,13 @@ class TestNode:
         with pytest.raises(ValidationError):
             Node(type="note", author="robot", content="Test")  # type: ignore
 
-    def test_content_min_length(self) -> None:
-        """Test content must be at least 1 character."""
-        with pytest.raises(ValidationError) as exc_info:
-            Node(type="note", author="human", content="")
+    def test_content_allows_empty(self) -> None:
+        """Empty content is allowed (Feature 014).
 
-        assert "at least 1 character" in str(exc_info.value)
+        content min_length is 0 so plugin nodes can start blank.
+        """
+        node = Node(type="note", author="human", content="")
+        assert node.content == ""
 
     def test_content_max_length(self) -> None:
         """Test content cannot exceed 10000 characters."""
@@ -363,28 +368,6 @@ class TestNodeFeature009Extensions:
         )
 
         assert node.llm_response is None
-
-    def test_node_llm_operation_id_field(self) -> None:
-        """Test llm_operation_id field persists correctly."""
-        op_id = uuid4()
-        node = Node(
-            type="question",
-            author="human",
-            content="Test",
-            llm_operation_id=op_id
-        )
-
-        assert node.llm_operation_id == op_id
-
-    def test_node_llm_operation_id_defaults_to_none(self) -> None:
-        """Test llm_operation_id defaults to None when not provided."""
-        node = Node(
-            type="question",
-            author="human",
-            content="Test"
-        )
-
-        assert node.llm_operation_id is None
 
     def test_font_size_default(self) -> None:
         """Test font_size defaults to 14."""
@@ -568,7 +551,6 @@ class TestNodeFeature009Extensions:
 
     def test_all_feature_009_fields_combined(self) -> None:
         """Test node with all Feature 009 fields set."""
-        op_id = uuid4()
         response = "# Quantum Entanglement\n\nDetailed explanation..."
 
         node = Node(
@@ -576,27 +558,23 @@ class TestNodeFeature009Extensions:
             author="human",
             content="Explain quantum entanglement",
             llm_response=response,
-            llm_operation_id=op_id,
             font_size=18,
             node_width=600,
             node_height=800
         )
 
         assert node.llm_response == response
-        assert node.llm_operation_id == op_id
         assert node.font_size == 18
         assert node.node_width == 600
         assert node.node_height == 800
 
     def test_feature_009_json_serialization(self) -> None:
         """Test Feature 009 fields serialize/deserialize correctly."""
-        op_id = uuid4()
         node = Node(
             type="question",
             author="human",
             content="Test question",
             llm_response="# Response\n\nContent",
-            llm_operation_id=op_id,
             font_size=16,
             node_width=500,
             node_height=600
@@ -606,7 +584,6 @@ class TestNodeFeature009Extensions:
         restored = Node.model_validate_json(json_str)
 
         assert restored.llm_response == "# Response\n\nContent"
-        assert restored.llm_operation_id == op_id
         assert restored.font_size == 16
         assert restored.node_width == 500
         assert restored.node_height == 600
@@ -639,7 +616,6 @@ class TestNodeFeature009Extensions:
 
         # New fields have defaults
         assert node.llm_response is None
-        assert node.llm_operation_id is None
         assert node.font_size == 14
         assert node.node_width == 400
         assert node.node_height == 400

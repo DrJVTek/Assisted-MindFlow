@@ -6,7 +6,7 @@ An AI-assisted visual reasoning engine based on graph nodes. MindFlow enables us
 
 ### Core Engine
 - **Graph-Based Reasoning**: Create directed acyclic graphs (DAGs) with typed nodes and parent-child relationships
-- **Multi-LLM Support**: Unified interface for Claude, OpenAI, Gemini, Mistral, Groq, and local models (Ollama)
+- **Multi-LLM Support**: Unified interface for OpenAI, Claude (Anthropic), Gemini, ChatGPT Web (subscription/OAuth), and local models (Ollama / LM Studio)
 - **Provider Registry**: Full CRUD management of LLM providers with API key storage and model selection
 - **Context-Aware AI**: Intelligent context selection strategies (Timeline, GraphNeighborhood, GroupContext, ManualOverride)
 - **Hierarchical Organization**: Organize nodes into groups and reusable projects
@@ -60,34 +60,23 @@ git clone https://github.com/Fora-Ante/Assisted-MindFlow.git
 cd "Assisted MindFlow"
 ```
 
-2. Create and activate a virtual environment:
+2. Install everything (backend venv + dev extras + frontend deps):
 ```bash
 # Windows
-python -m venv .venv
-.venv\Scripts\activate
+install.bat
 
 # Linux
-python3 -m venv .venv
-source .venv/bin/activate
+./install.sh
 ```
-
-3. Install dependencies:
+   Or manually (the run scripts expect the venv to be named `venv`):
 ```bash
-pip install -e ".[dev]"
+python -m venv venv
+venv\Scripts\pip install -e ".[dev]"     # Linux: venv/bin/pip install -e ".[dev]"
 ```
 
-4. Configure LLM providers:
-
-Providers can be managed directly from the UI (Settings > LLM Providers) or via environment variables:
-```bash
-# Set API keys via environment variables:
-# - ANTHROPIC_API_KEY for Claude
-# - OPENAI_API_KEY for OpenAI
-# - GOOGLE_API_KEY for Gemini
-# - MISTRAL_API_KEY for Mistral
-# - GROQ_API_KEY for Groq
-# - Ollama runs locally, no key needed
-```
+3. Configure LLM providers **from the UI** (Settings > LLM Providers): add a provider and paste
+   its API key (stored **encrypted** in `data/secrets/`, git-ignored — never in plaintext, never in
+   the repo), or sign in with ChatGPT (OAuth). Ollama needs no key.
 
 ### Frontend Setup
 
@@ -119,7 +108,8 @@ This will kill any existing servers and start both backend (port 8000) and front
 **Start Backend:**
 ```bash
 # From project root
-python -m uvicorn src.mindflow.api.server:app --reload --port 8000
+venv\Scripts\python.exe -m uvicorn mindflow.api.server:app --reload --port 8000
+# Linux: venv/bin/python -m uvicorn mindflow.api.server:app --reload --port 8000
 ```
 
 **Start Frontend:**
@@ -133,28 +123,19 @@ Then open http://localhost:5173 in your browser.
 
 ## Quick Start
 
-```python
-from mindflow.services.graph_engine import GraphEngine
-from mindflow.services.llm_manager import LLMManager
+1. `restart.bat` (or `./restart.sh`), then open http://localhost:5173.
+2. Create a canvas, then **double-click** the empty canvas (or right-click → *Add node*) and pick
+   **LLM Chat**.
+3. In Settings > LLM Providers, add a provider (API key or ChatGPT sign-in) and select it on the node.
+4. Type a prompt and hit **▶ Run** — the response streams into the node.
+5. Branch: right-click a node → *Add child* (or drag from an output port). **Merge** two branches by
+   wiring both into distinct input ports of a downstream node — context is rebuilt from the graph at
+   execution time (the graph IS the memory), so any node can be re-run at any point.
 
-# Initialize graph engine
-graph = GraphEngine()
-
-# Create a question node
-question_id = graph.create_node(
-    type="question",
-    content="What are the key principles of system design?",
-    author="human"
-)
-
-# Initialize LLM manager and generate AI response
-llm = LLMManager.from_config("config/config.json")
-llm.set_active_provider("claude")
-
-response = llm.generate(
-    messages=[{"role": "user", "content": "Explain system design principles"}],
-    temperature=0.7
-)
+Programmatic access uses the same REST API the UI calls, e.g.:
+```bash
+curl -X POST http://127.0.0.1:8000/api/graphs/<graph_id>/execute/<node_id> \
+     -H "Content-Type: application/json" -d "{\"stream\": false}"
 ```
 
 ## Project Structure
@@ -163,12 +144,12 @@ response = llm.generate(
 Assisted MindFlow/
 ├─ frontend/             # React-based visual interface
 │  ├─ src/
-│  │  ├─ components/     # UI components (Canvas, Node, ContextMenu)
-│  │  ├─ features/       # Feature modules (canvas, llm)
-│  │  │  └─ canvas/
-│  │  │     ├─ hooks/    # React hooks (useLayout, useUndoRedo)
-│  │  │     ├─ services/ # Layout services (elkjs integration)
-│  │  │     └─ utils/    # Canvas utilities
+│  │  ├─ components/     # Shared design system only (ui/, icons/, ErrorBoundary)
+│  │  ├─ features/       # Feature modules — each owns its components/
+│  │  │  ├─ canvas/      # Canvas host, hooks (useLayout, useUndoRedo), elkjs, utils
+│  │  │  ├─ nodes/       # Node, DetailPanel, NodeCreator/Editor, markdown
+│  │  │  ├─ providers/   # Provider settings, model selector, OAuth login
+│  │  │  └─ mcp/ plugins/ debate/ settings/ logging/ import/
 │  │  ├─ services/       # API client (Axios)
 │  │  ├─ stores/         # State management (Zustand)
 │  │  └─ types/          # TypeScript types
@@ -176,12 +157,13 @@ Assisted MindFlow/
 │  ├─ package.json       # Node.js dependencies
 │  └─ vite.config.ts     # Vite configuration
 ├─ src/mindflow/         # Backend Python library
-│  ├─ api/               # FastAPI server and routes
-│  ├─ models/            # Data models (Node, Group, Comment, Canvas)
-│  ├─ services/          # Business logic (GraphEngine, LLMManager, ContextEngine)
-│  ├─ providers/         # LLM provider implementations
-│  ├─ utils/             # Utilities (validation, cycles, tokens)
-│  └─ cli/               # Command-line interface
+│  ├─ api/               # FastAPI server (lifespan composition root) and routes
+│  ├─ engine/            # Orchestrator (graph execution) + topology utils + validator
+│  ├─ plugins/           # ComfyUI-style node-type plugin registry
+│  ├─ models/            # Data models (Node, Graph, Group, Comment, Canvas, Provider)
+│  ├─ services/          # mcp/ · auth/ · storage/ · graph/ · llm_web/ sub-packages
+│  ├─ providers/         # LLM providers (openai, anthropic, gemini, ollama, chatgpt)
+│  └─ utils/             # Utilities (validation, cycles, tokens)
 ├─ tests/                # Backend test suite
 │  ├─ unit/              # Unit tests
 │  ├─ integration/       # Integration tests
@@ -283,13 +265,8 @@ npm test -- useLayout
 
 ### Test Coverage
 
-- **Backend**: Minimum 80% code coverage target
-- **Frontend**: 45 tests passing (elkjs, layout, undo/redo)
-  - 8 tests: elkjsAdapter (graph format conversion)
-  - 12 tests: layoutService (layout computation)
-  - 11 tests: useLayout hook (reorganization logic)
-  - 11 tests: useUndoRedo hook (state management)
-  - 3 tests: Integration tests (layout with 50+ nodes)
+- **Backend**: 635 tests passing (unit / integration / contract; 80% coverage target)
+- **Frontend**: 129 tests passing across 12 files (components, stores, canvas layout/undo-redo)
 
 See [CLAUDE.md](CLAUDE.md) for detailed development rules and guidelines.
 

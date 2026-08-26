@@ -21,8 +21,8 @@ from mindflow.providers.base import (
     ProviderResponse,
     ProviderStatus,
 )
-from mindflow.services.oauth_service import OAuthService
-from mindflow.services.token_storage import TokenStorage
+from mindflow.services.auth.oauth_service import OAuthService
+from mindflow.services.auth.token_storage import TokenStorage
 
 logger = logging.getLogger(__name__)
 

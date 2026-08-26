@@ -24,10 +24,11 @@ No implicit context accumulation. The graph defines what each node sees.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import re
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 from uuid import UUID
 
 from mindflow.engine.executor import GraphExecutor, CycleDetectedError
@@ -45,6 +46,12 @@ class Orchestrator:
         graph: The Graph object containing nodes and their connections.
         registry: PluginRegistry with loaded node classes.
         provider_resolver: Callable that resolves a provider_id to a provider instance.
+        provider_type_resolver: Callable that resolves a provider *type* string
+            (e.g. "chatgpt_web", "local") to a live provider instance, used for
+            category-based auto-resolution when a node has no explicit provider_id.
+            Injected by the API layer so the engine never imports from
+            ``mindflow.api`` (dependency inversion). When absent, category-based
+            auto-resolution simply yields no provider.
     """
 
     def __init__(
@@ -52,10 +59,12 @@ class Orchestrator:
         graph: Any,
         registry: Any,
         provider_resolver: Any = None,
+        provider_type_resolver: Any = None,
     ):
         self._graph = graph
         self._registry = registry
         self._provider_resolver = provider_resolver
+        self._provider_type_resolver = provider_type_resolver
 
         # Build adjacency for the executor
         self._adjacency: dict[UUID, dict[str, list[UUID]]] = {}
@@ -96,7 +105,11 @@ class Orchestrator:
         if node.content and "prompt" not in inputs:
             inputs["prompt"] = node.content
 
-        # Override with connected parent outputs
+        # Override with connected parent outputs via named ports.
+        # Connections are the sole source of truth for input wiring — the
+        # legacy auto-wire from `node.parents` has been removed because it
+        # silently constructed context strings that bypassed the plugin's
+        # declared INPUT_TYPES and made debugging impossible.
         connections = node.connections or {}
         for input_name, conn_spec in connections.items():
             if isinstance(conn_spec, dict):
@@ -108,27 +121,6 @@ class Orchestrator:
                     parent_outputs = self._outputs.get(source_uuid, {})
                     if output_name in parent_outputs:
                         inputs[input_name] = parent_outputs[output_name]
-
-        # Auto-wire: if node has parents but no explicit connections,
-        # build context from all parent outputs (backward compatibility)
-        if not connections and node.parents:
-            context_parts = []
-            for parent_id in node.parents:
-                parent_outputs = self._outputs.get(parent_id, {})
-                # Collect response or text from parent
-                if "response" in parent_outputs:
-                    parent_node = self._graph.nodes.get(parent_id)
-                    parent_prompt = parent_node.content if parent_node else ""
-                    context_parts.append(
-                        f"User: {parent_prompt}\nAssistant: {parent_outputs['response']}"
-                    )
-                elif "context" in parent_outputs:
-                    context_parts.append(parent_outputs["context"])
-                elif "text" in parent_outputs:
-                    context_parts.append(parent_outputs["text"])
-
-            if context_parts:
-                inputs["context"] = "\n\n".join(context_parts)
 
         # Fill missing inputs with defaults from INPUT_TYPES metadata
         node_cls = self._get_node_class(node_id)
@@ -163,6 +155,79 @@ class Orchestrator:
         return inputs
 
     @staticmethod
+    def _check_required_inputs(
+        node_cls: Any,
+        node_id: UUID,
+        class_type: str,
+        inputs: dict[str, Any],
+    ) -> None:
+        """Raise a clear error if a required INPUT_TYPES field is missing.
+
+        Otherwise the user gets a Python `TypeError: ... missing 1 required
+        positional argument: 'model'` which is not actionable. This helper
+        walks the node's declared required inputs and raises a ValueError
+        with a message pointing at the actual missing config field.
+        """
+        input_types_func = getattr(node_cls, "INPUT_TYPES", None)
+        if not callable(input_types_func):
+            return
+        try:
+            input_types = input_types_func()
+        except Exception:
+            return
+        required = input_types.get("required", {}) or {}
+        missing: list[str] = []
+        for name, spec in required.items():
+            if name in inputs:
+                # Treat empty-string / None as missing for STRING fields
+                val = inputs[name]
+                if val not in ("", None):
+                    continue
+            missing.append(name)
+        if missing:
+            raise ValueError(
+                f"Node {node_id} ({class_type}) is missing required input(s): "
+                f"{', '.join(missing)}. "
+                f"Open the node in the side panel and fill these fields "
+                f"(for LLM nodes, pick a provider first so the model list populates)."
+            )
+
+    @staticmethod
+    def _filter_kwargs_for(func: Callable, inputs: dict[str, Any]) -> dict[str, Any]:
+        """Drop inputs that the callable can't accept.
+
+        The orchestrator eagerly populates the inputs dict with common keys
+        like `text` and `prompt` (from node.content) for backward compat,
+        but not every node declares those. Passing an unknown keyword to a
+        function without **kwargs raises TypeError. This helper filters the
+        dict down to only the parameters the function actually accepts.
+
+        If the function accepts **kwargs, no filtering is done — all keys
+        flow through and the callable decides what to use.
+        """
+        try:
+            sig = inspect.signature(func)
+        except (TypeError, ValueError):
+            # Built-in or C function — can't introspect, pass everything.
+            return inputs
+
+        has_var_kwargs = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
+        if has_var_kwargs:
+            return inputs
+
+        accepted = {
+            name for name, p in sig.parameters.items()
+            if p.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+        }
+        return {k: v for k, v in inputs.items() if k in accepted}
+
+    @staticmethod
     def _substitute_template_vars(inputs: dict[str, Any]) -> dict[str, Any]:
         """Replace {{variable}} placeholders in string inputs with resolved values.
 
@@ -193,13 +258,18 @@ class Orchestrator:
     def _get_node_class(self, node_id: UUID) -> Any:
         """Get the plugin class for a node.
 
-        Returns None only for nodes with no class_type (plain text nodes).
-        Raises ValueError if class_type is set but not found in registry.
+        Raises ValueError if class_type is missing or not found in the
+        registry. The previous silent fallback to `text_input` hid legacy
+        data bugs (old nodes with deleted class_types executed as no-ops).
         """
         node = self._graph.nodes[node_id]
         class_type = node.class_type
         if not class_type:
-            return self._registry.node_classes.get("text_input")
+            raise ValueError(
+                f"Node {node_id} has no class_type. Legacy graphs should have "
+                f"been migrated at load time — if you see this error the "
+                f"migration didn't run. Node type attribute: '{node.type}'."
+            )
         node_cls = self._registry.node_classes.get(class_type)
         if node_cls is None:
             raise ValueError(
@@ -223,8 +293,12 @@ class Orchestrator:
         if node.provider_id:
             return self._provider_resolver(str(node.provider_id))
 
-        # 2. Auto-resolve from plugin category
-        class_type = node.class_type or "text_input"
+        # 2. Auto-resolve from plugin category. If class_type is missing
+        # or unknown, no provider can be resolved — the caller will deal
+        # with the None provider.
+        class_type = node.class_type
+        if not class_type:
+            return None
         node_cls = self._registry.node_classes.get(class_type)
         if node_cls is None:
             return None
@@ -239,16 +313,12 @@ class Orchestrator:
         if plugin_provider_type == "ollama":
             plugin_provider_type = "local"
 
-        # Find matching provider in registry
-        from mindflow.api.routes.providers import _get_registry
-        provider_registry = _get_registry()
-        for p_config in provider_registry.list_providers():
-            if p_config.type.value == plugin_provider_type:
-                instance = provider_registry.get_provider_instance(str(p_config.id))
-                if instance:
-                    return instance
-
-        return None
+        # Delegate "find a live provider of this type" to the injected resolver.
+        # The engine must NOT import from mindflow.api — the API layer owns the
+        # provider registry and passes a closure over it (dependency inversion).
+        if self._provider_type_resolver is None:
+            return None
+        return self._provider_type_resolver(plugin_provider_type)
 
     async def _execute_node(self, node_id: UUID) -> dict[str, Any]:
         """Execute a single node and return its outputs as a dict.
@@ -283,11 +353,17 @@ class Orchestrator:
                 f"Node class '{node.class_type}' has no function '{func_name}'. "
                 f"Check the plugin's FUNCTION attribute."
             )
-            self._outputs[node_id] = outputs
-            return outputs
 
-        # Call execute
-        result = func(**inputs)
+        # Validate required inputs first so the user sees a clear message
+        # ("missing input: model") instead of a Python TypeError.
+        self._check_required_inputs(node_cls, node_id, node.class_type or "", inputs)
+
+        # Call execute with only the inputs this function actually accepts.
+        # The orchestrator populates common keys (text, prompt, provider)
+        # eagerly, but e.g. TextInputNode.execute only declares `text` and
+        # would crash on an unexpected `prompt` keyword.
+        call_kwargs = self._filter_kwargs_for(func, inputs)
+        result = func(**call_kwargs)
         # Handle both sync and async
         if asyncio.iscoroutine(result):
             result = await result
@@ -458,10 +534,15 @@ class Orchestrator:
                 f"but has no stream() method."
             )
 
-        # Stream tokens one by one
+        # Same required-input pre-check as batch execute.
+        self._check_required_inputs(node_cls, node_id, node.class_type or "", inputs)
+
+        # Stream tokens one by one. Filter inputs to the stream function's
+        # signature for the same reason as the batch-execute path.
         logger.info("Starting stream for node %s with model=%s", node_id, inputs.get("model", "?"))
+        stream_kwargs = self._filter_kwargs_for(stream_func, inputs)
         tokens = []
-        async for token in stream_func(**inputs):
+        async for token in stream_func(**stream_kwargs):
             tokens.append(token)
             yield {
                 "event": "token",

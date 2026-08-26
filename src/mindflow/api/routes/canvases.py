@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from mindflow.models.canvas import Canvas
 from mindflow.models.graph import Graph, GraphMetadata
-from mindflow.services.canvas_service import CanvasService
+from mindflow.services.storage.canvas_service import CanvasService
 from mindflow.api.routes import graphs
 
 # Configure logging

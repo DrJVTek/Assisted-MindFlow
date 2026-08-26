@@ -45,7 +45,7 @@ interface AuthActions {
 
 export type AuthStore = AuthState & AuthActions;
 
-export const useAuthStore = create<AuthStore>((set, _get) => ({
+export const useAuthStore = create<AuthStore>((set) => ({
   // Initial state
   authMethod: 'api_key',
   status: 'not_connected',

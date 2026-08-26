@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { OAuthLoginButton } from '../../src/components/OAuthLoginButton';
+import { OAuthLoginButton } from '../../src/features/providers/components/OAuthLoginButton';
 import { useAuthStore } from '../../src/stores/authStore';
 
 // Mock the auth store
